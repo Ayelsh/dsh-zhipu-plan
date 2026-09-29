@@ -1,0 +1,45 @@
+{
+  "name": "dsh-zhipu-plan",
+  "version": "0.2.1",
+  "private": true,
+  "type": "module",
+  "description": "Zhipu coding-plan sign-in and quota/usage page for DeepSeek Harness, installed as an out-of-tree profile bundle",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./typert": "./lib/typert.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "preview"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "verify": "node scripts/build.mjs && node scripts/verify.mjs && node scripts/client-smoke.mjs",
+    "client-smoke": "node scripts/client-smoke.mjs",
+    "preview": "node scripts/preview.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "zod": "^4.4.3"
+  }
+}

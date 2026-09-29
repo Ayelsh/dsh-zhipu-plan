@@ -1,0 +1,21 @@
+# Layer applied when a profile lists this bundle in `dsh.profile.bundles`.
+#
+# This single row is the feature; later profile and home layers can override
+# it. Requires an installation whose dsh-base mounts the authorization seam
+# (0.1.7-rc.2 and later; 0.2.0-rc.1 verified) — this patch must not insert
+# `authorization` itself, because a row dsh-base already declares would come
+# back from this layer as a duplicate entry id and fail the whole tree load.
+#
+# The GLM provider routes are NOT declared here either: the service writes
+# them into the shipped `llm-pi-ai` entry's settings document at runtime (the
+# same document the Models page edits). A patch row that overrides another
+# bundle's row would outlive this bundle and keep the plugin manager from
+# uninstalling it, so the patch stays insert-only.
+
+- insert:
+    # The Zhipu coding-plan account: the browser sign-in flow it registers
+    # with the base-provided authorization seam, the resolved plan credential,
+    # and the `zhipuPlan` Remote namespace the Usage page reads. The browser
+    # half ships in the same package as its `./client` export.
+    - id: zhipu-plan
+      name: 'dsh-zhipu-plan'

@@ -1,0 +1,152 @@
+/**
+ * Render the plan page to a standalone HTML file.
+ *
+ * The application's page cannot be inspected without a browser and a signed-in
+ * account, so this script mounts the real components into jsdom with fixture
+ * data, captures the markup, and writes one file that opens anywhere: the
+ * shell's own theme tokens, this plugin's stylesheet, and four panels — the
+ * signed-in page, the same page in the dark theme, the sign-in screen, and the
+ * reset dialog.
+ *
+ * The two shell primitives this page uses (Button, Modal) are stood in for by
+ * `preview-primitives.jsx`, so the buttons and the dialog are preview chrome
+ * rather than the application's own; everything else is the shipped code.
+ *
+ * Usage: `node scripts/preview.mjs [output.html]`
+ *
+ * @module dsh-zhipu-plan/scripts/preview
+ */
+
+import { build } from 'esbuild'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { zh, en } from '../src/client/locales.ts'
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const HARNESS = resolve(process.env['DSH_HARNESS_ROOT'] ?? join(ROOT, '..', '..', 'deepseek-harness'))
+const ANCHOR = join(HARNESS, 'packages/client/ui-primitives/package.json')
+const require = createRequire(ANCHOR)
+const OUT = resolve(process.argv[2] ?? join(ROOT, 'preview/plan-page.html'))
+
+const work = mkdtempSync(join(tmpdir(), 'zhipu-preview-'))
+const bundlePath = join(work, 'preview.mjs')
+
+await build({
+  entryPoints: [join(ROOT, 'scripts/preview-entry.jsx')],
+  outfile: bundlePath,
+  bundle: true,
+  format: 'esm',
+  platform: 'browser',
+  jsx: 'automatic',
+  logLevel: 'warning',
+  alias: {
+    'react': require.resolve('react'),
+    'react/jsx-runtime': require.resolve('react/jsx-runtime'),
+    'react-dom/client': require.resolve('react-dom/client'),
+    '@deepseek-ai/dsh-client-ui-primitives': join(ROOT, 'scripts/preview-primitives.jsx'),
+  },
+})
+
+const { JSDOM } = require('jsdom')
+const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>', { pretendToBeVisual: true })
+const { window } = dom
+globalThis.window = window
+globalThis.document = window.document
+globalThis.HTMLElement = window.HTMLElement
+globalThis.MouseEvent = window.MouseEvent
+globalThis.Event = window.Event
+globalThis.getComputedStyle = window.getComputedStyle.bind(window)
+// Node 22 defines `navigator` as a getter on the global object.
+Object.defineProperty(globalThis, 'navigator', { value: window.navigator, configurable: true, writable: true })
+
+const preview = await import(pathToFileURL(bundlePath).href)
+const dark = process.env['DSH_PREVIEW_DARK'] === '1'
+window.document.body.toggleAttribute('data-ds-dark-theme', dark)
+
+/** Mount one scenario, let its effects settle, and return the rendered markup. */
+async function capture(options, interact) {
+  const host = window.document.createElement('div')
+  host.className = 'dzp-preview-host'
+  window.document.body.append(host)
+  preview.mount(host, options)
+  await new Promise(resolve => setTimeout(resolve, 120))
+  if (interact !== undefined) {
+    interact(host)
+    await new Promise(resolve => setTimeout(resolve, 120))
+  }
+  const html = host.innerHTML
+  host.remove()
+  return html
+}
+
+const signedIn = await capture({ dictionary: zh, localeId: 'zh-CN', loginState: { state: 'signed-in' } })
+const signedInEn = await capture({ dictionary: en, localeId: 'en', loginState: { state: 'signed-in' } })
+const dialog = await capture(
+  { dictionary: zh, localeId: 'zh-CN', loginState: { state: 'signed-in' } },
+  (host) => {
+    const badge = host.querySelector('.dzp-resetBadge') ?? host.querySelector('.dzp-resetEntry')
+    badge?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  },
+)
+const signIn = await capture({
+  dictionary: zh,
+  localeId: 'zh-CN',
+  loginState: { state: 'waiting', authorizeUrl: 'https://chat.z.ai/api/oauth/authorize?client_id=…&state=…' },
+})
+const signedOut = await capture({ dictionary: zh, localeId: 'zh-CN', loginState: { state: 'idle' }, account: false })
+
+const themeCss = ['base.css', 'design-platform.css']
+  .map(name => readFileSync(join(HARNESS, 'packages/client/ui-theme/src/styles', name), 'utf8'))
+  .join('\n')
+
+const page = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dsh-zhipu-plan — 界面预览</title>
+<style>
+${themeCss}
+${preview.STYLE_SHEET}
+/* Preview chrome: the two shell primitives this page uses are stood in for here. */
+body { margin: 0; padding: 24px; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font-family: var(--dsw-font-family); }
+.dzp-preview-page { display: flex; flex-direction: column; gap: 10px; }
+.dzp-preview-host { max-width: 860px; padding: 20px; border: 0.5px solid var(--dsw-alias-border-secondary); border-radius: 14px; background: var(--dsw-alias-bg-base); }
+.dzp-preview-label { font-size: 12px; color: var(--dsw-alias-label-tertiary); margin: 18px 0 0; }
+.dzp-preview-button { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; border: 0.5px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; cursor: pointer; }
+.dzp-preview-sm { height: 26px; padding: 0 10px; }
+.dzp-preview-md { height: 32px; padding: 0 14px; }
+.dzp-preview-primary { background: var(--dsw-alias-button-primary-fill); border-color: transparent; color: var(--dsw-alias-label-primary-inverted); }
+.dzp-preview-outline { background: none; }
+.dzp-preview-ghost { background: none; border-color: transparent; color: var(--dsw-alias-label-secondary); }
+.dzp-preview-modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+.dzp-preview-modal-mask { position: absolute; inset: 0; background: var(--dsw-alias-bg-mask-1); }
+.dzp-preview-modal-dialog { position: relative; width: 460px; max-width: 92vw; border-radius: 14px; background: var(--dsw-alias-bg-overlay); border: 0.5px solid var(--dsw-alias-border-secondary); box-shadow: 0 12px 40px rgba(0,0,0,0.18); }
+.dzp-preview-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 0.5px solid var(--dsw-alias-border-secondary); }
+.dzp-preview-modal-title { font-size: 14px; font-weight: 600; }
+.dzp-preview-modal-body { padding: 16px; }
+</style>
+</head>
+<body>
+<div class="dzp-preview-page">
+  <p class="dzp-preview-label">已登录 / signed in（中文）</p>
+  <div class="dzp-preview-host" id="a">${signedIn}</div>
+  <p class="dzp-preview-label">已登录 / signed in（English）</p>
+  <div class="dzp-preview-host" id="b">${signedInEn}</div>
+  <p class="dzp-preview-label">重置弹窗 / reset dialog</p>
+  <div class="dzp-preview-host" id="c">${dialog}</div>
+  <p class="dzp-preview-label">等待授权 / waiting for authorization</p>
+  <div class="dzp-preview-host" id="d">${signIn}</div>
+  <p class="dzp-preview-label">未登录 / signed out</p>
+  <div class="dzp-preview-host" id="e">${signedOut}</div>
+</div>
+</body>
+</html>
+`
+
+mkdirSync(dirname(OUT), { recursive: true })
+writeFileSync(OUT, page)
+console.log(`preview: wrote ${OUT}`)
+console.log(`preview: ${signedIn.length} bytes of signed-in markup, ${dialog.length} of dialog markup`)

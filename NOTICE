@@ -1,0 +1,75 @@
+dsh-zhipu-plan
+Copyright (c) 2026 Ayelsh
+
+This product is licensed under the MIT License. See the LICENSE file for the
+full license text.
+
+--------------------------------------------------------------------------
+1. Upstream source: DeepSeek Harness (MIT)
+--------------------------------------------------------------------------
+The host modules under src/host/ (relay.ts, quota.ts, plan-key.ts, login.ts,
+record.ts, monitor.ts, types.ts, errors.ts) and the generated wire modules
+under src/wire/ are derived from the in-tree package
+@deepseek-ai/dsh-zhipu-plan of DeepSeek Harness:
+
+    DeepSeek Harness
+    Copyright (c) 2026 DeepSeek
+    License: MIT
+
+Substantial portions of src/host/ were carried over from that package; only
+the @module documentation tags were rewritten. The following files were
+carried over and then modified:
+
+  - src/host/reset.ts    - extended (refusalMessage(), RESET_TYPE mapping)
+  - src/host/service.ts  - extended (SettingsForms wiring, planKeyEnvs,
+                           syncProviderRoutes())
+
+src/wire/typert-host.js and src/wire/typert-remote-client.js were produced by
+@deepseek-ai/dsh-typert-generator from this project's own Host FaceModel and
+are reproduced here because the generator cannot run outside the upstream
+workspace.
+
+The MIT license text of DeepSeek Harness is reproduced below in section 3.
+
+--------------------------------------------------------------------------
+2. ZCode / Z.ai (Apache-2.0) - observed behaviour, not copied source
+--------------------------------------------------------------------------
+Sign-in and quota polling talk to the ZCode authorization relay at
+https://zcode.z.ai. That relay, its endpoint paths, its header names and its
+response envelope are an undocumented third-party contract observed from
+ZCode (https://github.com/zai-org/ZCode, Apache-2.0, Copyright 2026 Z.AI
+Co., Ltd) and rebuilt here. No ZCode source file is copied into this
+project.
+
+Note that the relay mints tokens under ZCode's own client identity. This
+project is NOT authored by, affiliated with, or endorsed by Z.AI / Zhipu.
+Using it may conflict with the Z.ai terms of service, and Z.ai may revoke
+access at any time. Every relay origin is a configurable setting precisely
+so that the dependency can be repointed or removed.
+
+"Z.ai", "Zhipu", "BigModel", "GLM" and "ZCode" are trademarks of their
+respective owners and are used here only descriptively to identify the
+services this plugin talks to.
+
+--------------------------------------------------------------------------
+3. MIT License (DeepSeek Harness)
+--------------------------------------------------------------------------
+Copyright (c) 2026 DeepSeek
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

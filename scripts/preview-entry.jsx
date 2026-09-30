@@ -21,8 +21,8 @@ const NOW = Date.now()
 const account = {
   deployment: 'bigmodel',
   planKind: 'individual-coding-plan',
-  accountId: '43341767146369163',
-  accountLabel: 'Ayelsh',
+  accountId: '00000000000000000',
+  accountLabel: 'Example User',
   jwtExpired: false,
   jwtExpiresAt: NOW + 6 * DAY,
 }

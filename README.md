@@ -66,7 +66,7 @@ The repository's Typert generator analyzes a `ts.Program` over the whole workspa
 
 ## Runtime dependencies
 
-The host half imports `@deepseek-ai/cordis`, `@deepseek-ai/dsh-credentials`, `@deepseek-ai/dsh-typert-protocol`, `@deepseek-ai/schemastery`, and `zod`. All of them are part of the installed application's own dependency closure, and the profile's module fallback links resolve them to the copies the running process already loaded — so the plugin shares the host's service instances instead of carrying a second copy. The package therefore declares no dependencies; installing it downloads nothing but the tarball.
+The host half imports `@deepseek-ai/cordis`, `@deepseek-ai/dsh-authorization`, `@deepseek-ai/dsh-credentials`, `@deepseek-ai/dsh-settings`, `@deepseek-ai/dsh-typert-protocol`, `@deepseek-ai/schemastery`, and `zod`. All of them are part of the installed application's own dependency closure, and the profile's module fallback links resolve them to the copies the running process already loaded — so the plugin shares the host's service instances instead of carrying a second copy. The package therefore declares no dependencies; installing it downloads nothing but the tarball.
 
 The browser half resolves `react`, `react/jsx-runtime`, and `@deepseek-ai/dsh-client-ui-primitives` from the shell's module table and inlines everything else.
 
@@ -77,3 +77,11 @@ The browser half resolves `react`, `react/jsx-runtime`, and `@deepseek-ai/dsh-cl
 - The plan API key the sign-in resolves is stored in the harness credential store under the deployment's own reference: `DSH_ZHIPU_PLAN_KEY` for the BigModel mainland deployment, `DSH_ZHIPU_PLAN_KEY_ZAI` for the Z.ai international deployment. A `zai` provider route configured by hand in **Settings → Models** would store its own key under `ZAI_API_KEY` and take precedence for that route.
 - The host half also reads the settings service, so the profile must mount `@deepseek-ai/dsh-settings-file` (every shipped app bundle does).
 - The application-usage tab of the original in-tree page (local session statistics) is not part of this plugin.
+## License and attribution
+
+MIT — see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
+
+- The host modules under src/host/ and the generated wire modules under src/wire/ are derived from the in-tree \@deepseek-ai/dsh-zhipu-plan\ package of DeepSeek Harness (MIT, Copyright (c) 2026 DeepSeek); \eset.ts\ and \service.ts\ were carried over and then extended.
+- Sign-in and quota polling talk to the ZCode authorization relay, an undocumented third-party contract observed from ZCode (Apache-2.0, Copyright 2026 Z.AI Co., Ltd) and rebuilt here; no ZCode source is copied into this project.
+
+This plugin is **not** authored by, affiliated with, or endorsed by Z.AI / Zhipu or DeepSeek. The relay mints tokens under ZCode's own client identity, so using this plugin may conflict with the Z.ai terms of service and Z.ai may revoke access at any time. Every relay origin is a configuration field so the dependency can be repointed or removed. "Z.ai", "Zhipu", "BigModel", "GLM" and "ZCode" are trademarks of their respective owners, used here only descriptively.

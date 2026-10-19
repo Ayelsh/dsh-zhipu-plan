@@ -7,7 +7,7 @@ Zhipu coding-plan sign-in, plan quota, and server-side usage for DeepSeek Harnes
 - **Settings → 智谱套餐 (Zhipu plan)**, contributed by this package's browser half, laid out like ZCode's own usage page:
   - **剩余额度** — one card per bucket: the five-hour prompt pool, the weekly pool, and the monthly tool allowance. Each card shows how much is left, when that bucket refills, and a bar in the bucket's colour; a bucket that is still untouched shows no reset entry, because a reset would give nothing back.
   - **可重置额度** — a dialog listing each bucket's remaining share and the resets the deployment has granted, with the countdown to their expiry.
-  - **用量趋势** — server-side model and tool totals, activity, cache health, decode speed, and the subscriptions on the account, over a 7-day, 30-day, or all-time window.
+  - **用量趋势** — server-side model and tool totals, activity, cache health, decode speed, and the subscriptions on the account, over a 7-day, 30-day, or all-time window. Every window owns its read: pressing a tab answers at once, the selected tab carries a quiet waiting mark, and a window still being read shows a progress line with the copy that says so — a first read fills in a skeleton table, while a re-read keeps the previous figures dimmed underneath. A failed read says so in place and offers 刷新, and switching again aborts the read the previous window left running. The all-time window follows ZCode's shape: the activity summary answers a whole year in one call, so the lifetime totals, peak day, streak, and active days all come from that answer, while the model, tool, and credit breakdowns cover the latest month and are labelled **最近 30 天**. The monitor families are read as independent data planes — a refused one clears only its own section instead of failing the tab — and every request stays inside the monitor's published 30-day window cap.
   - Sign-in against either deployment (`Z.ai` international or `BigModel` mainland) for the individual, Team, and Start plans: the host opens the relay's authorization page, shows the address with a copy button while it waits, and polls until the attempt settles. The page never sees a token.
 - **The `zhipuPlan` Remote namespace** behind that page. The application's own Remote assembly only mounts the namespaces it was built with, so this plugin mounts its own contribution at activation (see `src/wire/`).
 - **GLM models usable after sign-in.** The service writes the signed-in deployment's provider route into the shipped `llm-pi-ai` entry's settings document — the same document the Models page edits — and clears both routes on sign-out: `zai-coding-cn` reads `DSH_ZHIPU_PLAN_KEY`, `zai` reads `DSH_ZHIPU_PLAN_KEY_ZAI`. The matching deployment's models resolve in the picker; the other deployment's provider stays dormant, and a request to it fails loud about the missing credential rather than reaching the wrong endpoint. The bundle patch stays insert-only: a patch row overriding another bundle's row would outlive this bundle and keep the plugin manager from uninstalling it. Because the routes live in the profile's own patch layer, uninstalling a signed-in account leaves them (and the stored plan key) in place; remove them in **Settings → Models** if you want the models gone too.
@@ -23,7 +23,7 @@ Resets are **granted by the deployment, not bought by a button**. Two things hap
 
 Spending one is the only manual step, and it goes through the dialog. The deployment confirms it — the window stays `processing` until the status reports the new `usedAt`, so a stale read cannot make a spent reset look available again. This is the same mechanism ZCode uses (`packages/ui/src/lib/codingPlanQuotaResetCoordinator.ts`, `packages/services/src/usage-stats/providers/bigmodelUsageQuotaProvider.ts` in that repository).
 
-`preview/plan-page.html` in this package renders the page with fixture data — signed in, the reset dialog, the waiting screen, and the signed-out screen — so the layout can be reviewed without installing anything.
+`pnpm run preview` writes the page with fixture data to `preview/plan-page.html` — signed in in both languages, the reset dialog, the waiting and signed-out screens, a window being read, a read that failed, and the all-time window — in both themes, so the layout can be reviewed without installing anything. `preview/plan-page-dark.html` is the same page against the dark theme; `scripts/preview-shots.mjs` photographs the scenes into `preview/shots/` when a browser is available.
 
 ## Install
 
@@ -66,6 +66,7 @@ pnpm install
 pnpm run build      # writes lib/index.js, lib/typert.js, lib/client.js
 pnpm run verify     # build, then the artifact, dictionary, and Remote checks
 pnpm run preview    # writes preview/plan-page.html and preview/plan-page-dark.html
+node scripts/preview-shots.mjs   # optional: photographs both pages into preview/shots
 pnpm pack           # writes dsh-zhipu-plan-<version>.tgz
 ```
 

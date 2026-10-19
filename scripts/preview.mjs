@@ -3,16 +3,19 @@
  *
  * The application's page cannot be inspected without a browser and a signed-in
  * account, so this script mounts the real components into jsdom with fixture
- * data, captures the markup, and writes one file that opens anywhere: the
- * shell's own theme tokens, this plugin's stylesheet, and four panels — the
- * signed-in page, the same page in the dark theme, the sign-in screen, and the
- * reset dialog.
+ * data, captures the markup, and writes files that open anywhere: the shell's
+ * own theme tokens, this plugin's stylesheet, and eight panels — the signed-in
+ * page in both languages, the reset dialog, the waiting and signed-out screens,
+ * a window being read, a read that failed, and the all-time window — once as
+ * the light page and once as the dark one.
  *
  * The two shell primitives this page uses (Button, Modal) are stood in for by
  * `preview-primitives.jsx`, so the buttons and the dialog are preview chrome
  * rather than the application's own; everything else is the shipped code.
  *
- * Usage: `node scripts/preview.mjs [output.html]`
+ * Usage: `node scripts/preview.mjs [output.html]` — by default it writes
+ * `preview/plan-page.html` and `preview/plan-page-dark.html`; with an explicit
+ * output path it writes only that file.
  *
  * @module dsh-zhipu-plan/scripts/preview
  */
@@ -30,6 +33,7 @@ const HARNESS = resolve(process.env['DSH_HARNESS_ROOT'] ?? join(ROOT, '..', '..'
 const ANCHOR = join(HARNESS, 'packages/client/ui-primitives/package.json')
 const require = createRequire(ANCHOR)
 const OUT = resolve(process.argv[2] ?? join(ROOT, 'preview/plan-page.html'))
+const EXPLICIT = process.argv[2] !== undefined
 
 const work = mkdtempSync(join(tmpdir(), 'zhipu-preview-'))
 const bundlePath = join(work, 'preview.mjs')
@@ -63,8 +67,6 @@ globalThis.getComputedStyle = window.getComputedStyle.bind(window)
 Object.defineProperty(globalThis, 'navigator', { value: window.navigator, configurable: true, writable: true })
 
 const preview = await import(pathToFileURL(bundlePath).href)
-const dark = process.env['DSH_PREVIEW_DARK'] === '1'
-window.document.body.toggleAttribute('data-ds-dark-theme', dark)
 
 /** Mount one scenario, let its effects settle, and return the rendered markup. */
 async function capture(options, interact) {
@@ -97,6 +99,30 @@ const signIn = await capture({
   loginState: { state: 'waiting', authorizeUrl: 'https://chat.z.ai/api/oauth/authorize?client_id=…&state=…' },
 })
 const signedOut = await capture({ dictionary: zh, localeId: 'zh-CN', loginState: { state: 'idle' }, account: false })
+const reading = await capture({
+  dictionary: zh,
+  localeId: 'zh-CN',
+  loginState: { state: 'signed-in' },
+  usage: 'pending',
+})
+const readFailed = await capture({
+  dictionary: zh,
+  localeId: 'zh-CN',
+  loginState: { state: 'signed-in' },
+  usage: 'failed',
+})
+const allTime = await capture(
+  {
+    dictionary: zh,
+    localeId: 'zh-CN',
+    loginState: { state: 'signed-in' },
+    usage: 'all',
+  },
+  (host) => {
+    const tabs = host.querySelectorAll('[role="tab"]')
+    tabs[tabs.length - 1]?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  },
+)
 
 const themeCss = ['base.css', 'design-platform.css']
   .map(name => readFileSync(join(HARNESS, 'packages/client/ui-theme/src/styles', name), 'utf8'))
@@ -129,7 +155,7 @@ body { margin: 0; padding: 24px; background: var(--dsw-alias-bg-base); color: va
 .dzp-preview-modal-body { padding: 16px; }
 </style>
 </head>
-<body${dark ? ' data-ds-dark-theme' : ''}>
+<body@@DARK@@>
 <div class="dzp-preview-page">
   <p class="dzp-preview-label">已登录 / signed in（中文）</p>
   <div class="dzp-preview-host" id="a">${signedIn}</div>
@@ -141,14 +167,27 @@ body { margin: 0; padding: 24px; background: var(--dsw-alias-bg-base); color: va
   <div class="dzp-preview-host" id="d">${signIn}</div>
   <p class="dzp-preview-label">未登录 / signed out</p>
   <div class="dzp-preview-host" id="e">${signedOut}</div>
+  <p class="dzp-preview-label">读取中 / reading a window</p>
+  <div class="dzp-preview-host" id="f">${reading}</div>
+  <p class="dzp-preview-label">读取失败 / read failed</p>
+  <div class="dzp-preview-host" id="g">${readFailed}</div>
+  <p class="dzp-preview-label">全部时间 / all time</p>
+  <div class="dzp-preview-host" id="h">${allTime}</div>
 </div>
 </body>
 </html>
 `
 
-mkdirSync(dirname(OUT), { recursive: true })
-writeFileSync(OUT, page)
-console.log(`preview: wrote ${OUT}`)
+// The page markup carries no theme of its own: the shell's tokens flip on the
+// body attribute, so one capture is enough to write both pages.
+const pages = EXPLICIT
+  ? [[OUT, '']]
+  : [[OUT, ''], [join(dirname(OUT), 'plan-page-dark.html'), ' data-ds-dark-theme']]
+for (const [path] of pages) mkdirSync(dirname(path), { recursive: true })
+for (const [path, darkAttribute] of pages) {
+  writeFileSync(path, page.replaceAll('@@DARK@@', darkAttribute))
+  console.log(`preview: wrote ${path}`)
+}
 console.log(`preview: ${signedIn.length} bytes of signed-in markup, ${dialog.length} of dialog markup`)
 // jsdom's visual mode leaves a frame loop running, so the process does not
 // drain on its own; the file is written and flushed by now.

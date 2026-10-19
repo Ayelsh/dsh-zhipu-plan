@@ -53,7 +53,8 @@ import {
 } from './record.ts'
 import { ZhipuAuthRelay, createPollToken, type RelayPollReady } from './relay.ts'
 import type {
-  PlanQuotaSnapshot, PlanResetKind, PlanResetStatus, PlanUsageRange, PlanUsageReport,
+  PlanActivitySummary, PlanCreditSummary, PlanQuotaSnapshot, PlanResetKind, PlanResetStatus,
+  PlanSubscription, PlanUsageRange, PlanUsageReport,
   ZhipuPlanAccountView, ZhipuPlanDeployment, ZhipuPlanKind, ZhipuPlanLoginState, ZhipuPlanStatus,
 } from './types.ts'
 
@@ -96,6 +97,39 @@ async function inBatches<T, R>(
     readings.push(...await Promise.all(items.slice(index, index + size).map(item => read(item))))
   }
   return readings
+}
+
+/**
+ * Read one family over its windows, keeping the windows that answered.
+ *
+ * A family that spans several monitor windows is a sequence of independent
+ * reads; one refused window would otherwise blank a breakdown whose other
+ * windows arrived fine. The chunks that answered are returned for merging, and
+ * every refusal is reported to the caller's logger so a silently short total
+ * still leaves a trace. Cancellation is not a partial answer: it is rethrown.
+ *
+ * @param windows - the range's windows for this family, newest first.
+ * @param read - the operation to run for one window.
+ * @param signal - the caller's cancellation.
+ * @param onFailure - receives each window that could not be read.
+ * @returns the readings that arrived, in window order.
+ */
+async function readBestEffort<T>(
+  windows: readonly string[],
+  read: (window: string) => Promise<T>,
+  signal: AbortSignal | undefined,
+  onFailure: (error: unknown) => void,
+): Promise<T[]> {
+  const readings = await inBatches(windows, 4, async (window): Promise<T | undefined> => {
+    try {
+      return await read(window)
+    } catch (error) {
+      if (signal?.aborted === true) throw error
+      onFailure(error)
+      return undefined
+    }
+  })
+  return readings.filter((reading): reading is T => reading !== undefined)
 }
 
 /** Service configuration; every field names a third-party address or a deadline. */
@@ -379,50 +413,62 @@ export class ZhipuPlanService extends TypertRemoteService {
       requestTimeoutMs: this.config.requestTimeoutMs,
       signal,
     }
-    // The activity summary answers a whole year in one call; the usage, credit,
-    // and performance families cap a window at roughly a month, so a year-long
-    // range is read a month at a time and the parts are merged below.
-    const activityWindows = usageWindows(range, timeZone, Date.now(), ACTIVITY_CHUNK_DAYS)
-    const usageWindowsOfRange = usageWindows(range, timeZone, Date.now(), USAGE_CHUNK_DAYS)
-    const creditWindows = usageWindows(range, timeZone, Date.now(), CREDIT_CHUNK_DAYS)
+    // ZCode's all-time read, translated: its lifetime surface is one year-long
+    // activity call, and its breakdown families never ask for more than the
+    // month the monitor answers. So an all-time read asks the activity summary
+    // for the whole year — the lifetime totals, peak, streak, and active days
+    // come from that one answer — while the model, tool, performance, and
+    // credit families cover the latest month instead of being stitched out of a
+    // dozen windows each. Every request then sits inside the monitor's own cap.
+    const now = Date.now()
+    const breakdownRange: PlanUsageRange = range === 'all' ? '30d' : range
+    const breakdownWindows = usageWindows(breakdownRange, timeZone, now, USAGE_CHUNK_DAYS)
+    const creditWindows = usageWindows(breakdownRange, timeZone, now, CREDIT_CHUNK_DAYS)
+    const activityWindow = usageWindows(range, timeZone, now, ACTIVITY_CHUNK_DAYS)[0]
+      ?? usageWindow(range, timeZone, now)
+    const warn = (family: string) => (error: unknown): void => {
+      this.ctx.logger.warn('zhipu-plan: usage family %s unavailable: %s', family, error)
+    }
+    // The activity answer carries the figures the surface cannot derive from
+    // any other read, so it stays required. The remaining families are
+    // independent data planes, the way ZCode treats them: a refused one clears
+    // only its own section and the rest of the tab still renders.
+    let activity: PlanActivitySummary
     try {
-      // Chunked families are read in small parallel batches: a year is a dozen
-      // requests each, and firing them all at once would outlast the window one
-      // request is given.
-      const models = mergeModelUsage(await inBatches(
-        usageWindowsOfRange,
-        4,
-        async window => fetchModelUsage(read, window, read),
-      ))
-      const tools = mergeToolUsage(await inBatches(
-        usageWindowsOfRange,
-        4,
-        async window => fetchToolUsage(read, window, read),
-      ))
-      const decodeSpeed = mergeDecodeSpeed(await inBatches(
-        usageWindowsOfRange,
-        4,
-        async window => fetchDecodeSpeed(read, window, read),
-      ))
-      const [activity, credits, subscriptions] = await Promise.all([
-        fetchActivity(read, activityWindows[0] ?? usageWindow(range, timeZone, Date.now())),
-        fetchCreditSummary(read, creditWindows[0] ?? usageWindow(range, timeZone, Date.now())),
-        fetchSubscriptionList(read, account.accessToken),
-      ])
-      return {
-        deployment: account.deployment,
-        range,
-        fetchedAt: Date.now(),
-        models,
-        tools,
-        activity,
-        credits,
-        decodeSpeed,
-        subscriptions,
-      }
+      activity = await fetchActivity(read, activityWindow)
     } catch (error) {
       if (signal.aborted) throw error
       throw zhipuPlanError('zhipu-plan/network', 'the plan monitor could not be reached', { cause: error })
+    }
+    const bestEffort = async <T>(family: string, windows: readonly string[], readWindow: (window: string) => Promise<T>) =>
+      readBestEffort(windows, readWindow, signal, warn(family))
+    const [modelParts, toolParts, decodeParts] = await Promise.all([
+      bestEffort('models', breakdownWindows, window => fetchModelUsage(read, window, read)),
+      bestEffort('tools', breakdownWindows, window => fetchToolUsage(read, window, read)),
+      bestEffort('decodeSpeed', breakdownWindows, window => fetchDecodeSpeed(read, window, read)),
+    ])
+    const [credits, subscriptions] = await Promise.all([
+      fetchCreditSummary(read, creditWindows[0] ?? activityWindow).catch((error: unknown): PlanCreditSummary => {
+        if (signal.aborted) throw error
+        warn('credits')(error)
+        return {}
+      }),
+      fetchSubscriptionList(read, account.accessToken).catch((error: unknown): readonly PlanSubscription[] => {
+        if (signal.aborted) throw error
+        warn('subscriptions')(error)
+        return []
+      }),
+    ])
+    return {
+      deployment: account.deployment,
+      range,
+      fetchedAt: Date.now(),
+      models: mergeModelUsage(modelParts),
+      tools: mergeToolUsage(toolParts),
+      activity,
+      credits,
+      decodeSpeed: mergeDecodeSpeed(decodeParts),
+      subscriptions,
     }
   }
 

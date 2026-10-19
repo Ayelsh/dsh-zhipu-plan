@@ -8,10 +8,19 @@
  * The surface is read-only: it chooses a window, reads it, and reports what came
  * back — including the wait for it.
  *
+ * Each window owns its own read state. Switching tabs answers immediately: the
+ * chosen tab is pressed and the content swaps direction-aware in the same
+ * frame, while a read that is actually running shows a progress line and the
+ * copy that says so. A window that already answered keeps its answer across a
+ * revisit; a stale one keeps showing while it is read again, so the surface
+ * never flashes empty between two answers. The in-flight read is aborted when
+ * the chosen window changes again, because the answer for a window nobody is
+ * looking at is work worth dropping.
+ *
  * @module dsh-zhipu-plan/client/PlanUsagePanel
  */
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { PlanLocaleKey } from './locales.ts'
 import type { PlanDecodeSpeed, PlanUsageRange, PlanUsageReport } from './plan-types.ts'
 import { tokenText } from './token-text.ts'
@@ -28,6 +37,25 @@ const HOUR_MS = 3_600_000
 
 /** How many stand-in rows the tables show while the window is being read. */
 const SKELETON_ROWS = 3
+
+/**
+ * How long an answered window stays fresh enough to answer a revisit without a
+ * read. A reading is a snapshot of usage that only grows; a minute keeps a
+ * back-and-forth between two tabs from re-reading while still letting a
+ * reference that is a moment old catch up.
+ */
+const REVISIT_FRESH_MS = 60_000
+
+/** The direction the content travels when the chosen window moves. */
+type SwapDirection = 'none' | 'next' | 'prev'
+
+/** One window's read state; the answer is kept across a refresh so the surface never flashes empty. */
+interface RangeLoad {
+  readonly phase: 'loading' | 'ready' | 'failed'
+  readonly report?: PlanUsageReport
+  /** Wall-clock time of the answer, so a revisit knows whether it is still fresh. */
+  readonly loadedAt?: number
+}
 
 /** Percentage text for one share of the window total. */
 function shareText(tokens: number, total: number): string {
@@ -86,6 +114,16 @@ function SkeletonRows(props: { readonly columns: number }): ReactNode {
   )
 }
 
+/** The state a window is left in when its read would not answer. */
+function failedLoad(previous: RangeLoad | undefined): RangeLoad {
+  return previous?.report === undefined ? { phase: 'failed' } : { phase: 'failed', report: previous.report }
+}
+
+/** The state a window is put in while its read runs, keeping an earlier answer on screen. */
+function loadingLoad(previous: RangeLoad | undefined): RangeLoad {
+  return previous?.report === undefined ? { phase: 'loading' } : { phase: 'loading', report: previous.report }
+}
+
 /**
  * Render the window's usage: models, tools, activity, and subscriptions.
  * @param props - copy seat and the host read.
@@ -93,77 +131,172 @@ function SkeletonRows(props: { readonly columns: number }): ReactNode {
  */
 export function PlanUsagePanel(props: {
   readonly t: Translate
-  readonly loadUsage: (range: PlanUsageRange) => Promise<PlanUsageReport | undefined>
+  readonly loadUsage: (range: PlanUsageRange, signal?: AbortSignal) => Promise<PlanUsageReport | undefined>
 }): ReactNode {
   const { t, loadUsage } = props
-  const [range, setRange] = useState<PlanUsageRange>('7d')
-  const [report, setReport] = useState<PlanUsageReport | undefined>()
-  const [failed, setFailed] = useState(false)
+  const [swap, setSwap] = useState<{ readonly range: PlanUsageRange; readonly direction: SwapDirection }>({
+    range: '7d',
+    direction: 'none',
+  })
+  const [loads, setLoads] = useState<Partial<Record<PlanUsageRange, RangeLoad>>>({})
+  const [attempt, setAttempt] = useState(0)
+  const range = swap.range
+  const tabRefs = useRef(new Map<PlanUsageRange, HTMLButtonElement>())
+  const latestLoads = useRef(loads)
+  latestLoads.current = loads
+  const baseId = useId()
+  const panelId = `${baseId}-panel`
+  const tabId = (candidate: PlanUsageRange): string => `${baseId}-tab-${candidate}`
 
+  const selectRange = (next: PlanUsageRange): void => {
+    if (next === range) return
+    setSwap({
+      range: next,
+      direction: RANGES.indexOf(next) > RANGES.indexOf(range) ? 'next' : 'prev',
+    })
+  }
+
+  // One read per chosen window. A fresh answer answers the switch by itself;
+  // anything else clears the window's own state to loading, keeps the previous
+  // answer (if any) on screen, and aborts whatever the previous window was
+  // still reading.
   useEffect(() => {
-    const current = { cancelled: false }
-    loadUsage(range).then(
+    const cached = latestLoads.current[range]
+    if (cached?.phase === 'ready' && Date.now() - (cached.loadedAt ?? 0) < REVISIT_FRESH_MS) return
+    const controller = new AbortController()
+    let current = true
+    setLoads(previous => ({ ...previous, [range]: loadingLoad(previous[range]) }))
+    loadUsage(range, controller.signal).then(
       (loaded) => {
-        if (current.cancelled) return
-        setReport(loaded)
-        setFailed(loaded === undefined)
+        if (!current) return
+        setLoads(previous => ({
+          ...previous,
+          [range]: loaded === undefined
+            ? failedLoad(previous[range])
+            : { phase: 'ready', report: loaded, loadedAt: Date.now() },
+        }))
       },
       () => {
-        if (current.cancelled) return
-        setFailed(true)
+        if (!current) return
+        setLoads(previous => ({ ...previous, [range]: failedLoad(previous[range]) }))
       },
     )
-    return () => { current.cancelled = true }
-  }, [range, loadUsage])
+    return () => {
+      current = false
+      controller.abort()
+    }
+  }, [range, attempt, loadUsage])
 
-  const decode = report === undefined ? undefined : decodeText(t, report.decodeSpeed)
+  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, candidate: PlanUsageRange): void => {
+    const index = RANGES.indexOf(candidate)
+    let next: PlanUsageRange
+    if (event.key === 'ArrowRight') next = RANGES[(index + 1) % RANGES.length] ?? candidate
+    else if (event.key === 'ArrowLeft') next = RANGES[(index - 1 + RANGES.length) % RANGES.length] ?? candidate
+    else if (event.key === 'Home') next = RANGES[0] ?? candidate
+    else if (event.key === 'End') next = RANGES[RANGES.length - 1] ?? candidate
+    else return
+    event.preventDefault()
+    selectRange(next)
+    tabRefs.current.get(next)?.focus()
+  }
+
+  const current = loads[range]
+  const report = current?.report
+  const loading = current === undefined || current.phase === 'loading'
+  const failed = current?.phase === 'failed'
+  const refreshing = loading && report !== undefined
+  const skeleton = loading && report === undefined
+  // Active days are the days that reported usage, not every day the monitor
+  // pads the series with: a year of zero-token days is still one active day.
+  const activeDays = report === undefined
+    ? 0
+    : report.activity.days.filter(day => day.tokens > 0).length
   const empty = report !== undefined
     && report.models.models.length === 0
     && report.tools.tools.length === 0
-    && report.activity.days.length === 0
+    && activeDays === 0
+  const decode = report === undefined ? undefined : decodeText(t, report.decodeSpeed)
+  // An all-time window reads the activity summary over the year (the lifetime
+  // figures) and the breakdown families over their latest month, so the two
+  // breakdown sections say which span they cover.
+  const monthScoped = range === 'all'
   const rangeLabel: Record<PlanUsageRange, PlanLocaleKey> = { '7d': 'range7d', '30d': 'range30d', all: 'rangeAll' }
 
   return (
     <section className={styles.section}>
       <div className={styles.sectionHead}>
         <h3 className={styles.sectionTitle}>{t('usageTitle')}</h3>
-        <div className={styles.rangeTabs} role="group" aria-label={t('usageTitle')}>
-          {RANGES.map(candidate => (
-            <button
-              key={candidate}
-              type="button"
-              className={styles.rangeTab}
-              aria-pressed={candidate === range}
-              onClick={() => { setRange(candidate) }}
-            >
-              {t(rangeLabel[candidate])}
-            </button>
-          ))}
+        <div className={styles.rangeTabs} role="tablist" aria-label={t('usageTitle')}>
+          {RANGES.map((candidate) => {
+            const selected = candidate === range
+            return (
+              <button
+                key={candidate}
+                ref={(node) => {
+                  if (node === null) tabRefs.current.delete(candidate)
+                  else tabRefs.current.set(candidate, node)
+                }}
+                id={tabId(candidate)}
+                type="button"
+                role="tab"
+                className={styles.rangeTab}
+                aria-selected={selected}
+                aria-controls={panelId}
+                tabIndex={selected ? 0 : -1}
+                data-loading={selected && loading ? 'true' : undefined}
+                onClick={() => { selectRange(candidate) }}
+                onKeyDown={(event) => { onTabKeyDown(event, candidate) }}
+              >
+                {t(rangeLabel[candidate])}
+              </button>
+            )
+          })}
         </div>
       </div>
-      {failed
-        ? <p className={styles.warning} role="status">{t('usageFailed')}</p>
-        : report === undefined
-          ? (
-            <div className={styles.usageBlock} role="status">
-              <p className={styles.status}>{t('usageLoading')}</p>
-              <table className={styles.usageTable}>
-                <thead>
-                  <tr>
-                    <th>{t('usageModel')}</th>
-                    <th>{t('usageTokens')}</th>
-                    <th>{t('usageShare')}</th>
-                  </tr>
-                </thead>
-                <tbody><SkeletonRows columns={3} /></tbody>
-              </table>
-            </div>
-          )
-          : empty
-            ? <p className={styles.emptyState} role="status">{t('usageEmpty')}</p>
-            : (
-              <div className={styles.usageSection}>
-                <h4 className={styles.dialogSectionTitle}>{t('usageModels')}</h4>
+      <div
+        id={panelId}
+        role="tabpanel"
+        aria-labelledby={tabId(range)}
+        aria-busy={loading || undefined}
+        tabIndex={0}
+        className={styles.usagePanel}
+      >
+        {/* Remounted per window: the selected tab is answered with the content
+            travelling in from the side the selection came from. */}
+        <div key={range} className={styles.usageSwap} data-direction={swap.direction}>
+          {loading ? <div className={styles.usageProgress} aria-hidden="true" /> : null}
+
+          {refreshing
+            ? (
+              <p className={styles.usageStatus} role="status">
+                <span className={styles.spinner} aria-hidden="true" />
+                <span>{t('usageLoading')}</span>
+              </p>
+            )
+            : null}
+
+          {failed
+            ? (
+              <div className={styles.usageFailure} role="status">
+                <p className={styles.warning}>{t('usageFailed')}</p>
+                <button
+                  type="button"
+                  className={styles.usageRetry}
+                  onClick={() => { setAttempt(value => value + 1) }}
+                >
+                  {t('refresh')}
+                </button>
+              </div>
+            )
+            : null}
+
+          {skeleton
+            ? (
+              <div className={styles.usageBlock} role="status">
+                <p className={styles.usageStatus}>
+                  <span className={styles.spinner} aria-hidden="true" />
+                  <span>{t('usageLoading')}</span>
+                </p>
                 <table className={styles.usageTable}>
                   <thead>
                     <tr>
@@ -172,77 +305,119 @@ export function PlanUsagePanel(props: {
                       <th>{t('usageShare')}</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {report.models.models.map(model => (
-                      <tr key={model.model}>
-                        <td>{model.model}</td>
-                        <td>{tokenText(model.tokens)}</td>
-                        <td>{shareText(model.tokens, report.models.tokens)}</td>
-                      </tr>
-                    ))}
-                    <tr>
-                      <td>{t('usageCalls')}</td>
-                      <td>{String(report.models.calls)}</td>
-                      <td>—</td>
-                    </tr>
-                  </tbody>
+                  <tbody><SkeletonRows columns={3} /></tbody>
                 </table>
-
-                <h4 className={styles.dialogSectionTitle}>{t('usageTools')}</h4>
-                <table className={styles.usageTable}>
-                  <thead>
-                    <tr>
-                      <th>{t('toolName')}</th>
-                      <th>{t('toolCalls')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.tools.tools.map(tool => (
-                      <tr key={tool.tool}>
-                        <td>{tool.tool}</td>
-                        <td>{String(tool.calls)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                <dl className={styles.facts}>
-                  <Fact label={t('usageActiveDays')} value={String(report.activity.days.length)} />
-                  <Fact
-                    label={t('usagePeakDay')}
-                    value={`${tokenText(report.activity.peakDayTokens)}${report.activity.peakDay === undefined ? '' : ` (${report.activity.peakDay})`}`}
-                  />
-                  <Fact
-                    label={t('usageStreak')}
-                    value={`${String(report.activity.currentStreakDays)} / ${String(report.activity.longestStreakDays)}`}
-                  />
-                  <Fact label={t('usageUsageTime')} value={`${(report.activity.totalUsageMs / HOUR_MS).toFixed(1)} h`} />
-                  {report.credits.cacheHitRate === undefined
-                    ? null
-                    : <Fact label={t('usageCacheHit')} value={`${(report.credits.cacheHitRate * 100).toFixed(1)}%`} />}
-                  {decode === undefined ? null : <Fact label={t('usageDecodeSpeed')} value={decode} />}
-                </dl>
-
-                {report.subscriptions.length === 0 ? null : (
-                  <>
-                    <h4 className={styles.dialogSectionTitle}>{t('subscription')}</h4>
-                    <dl className={styles.facts}>
-                      {report.subscriptions.map(subscription => (
-                        <Fact
-                          key={subscription.productName}
-                          label={subscription.productName}
-                          value={[
-                            subscription.renewTime === undefined ? undefined : t('subscriptionRenew', { time: subscription.renewTime }),
-                            subscription.billingCycle === undefined ? undefined : t('subscriptionCycle', { cycle: subscription.billingCycle }),
-                            subscription.autoRenew ? t('subscriptionAutoRenew') : undefined,
-                          ].filter((entry): entry is string => entry !== undefined).join(' · ')}
-                        />
-                      ))}
-                    </dl>
-                  </>
-                )}
               </div>
-            )}
+            )
+            : null}
+
+          {report === undefined
+            ? null
+            : empty
+              ? <p className={styles.emptyState} role="status">{t('usageEmpty')}</p>
+              : (
+                <div className={styles.usageSection} data-refreshing={refreshing ? 'true' : undefined}>
+                  {report.models.models.length === 0 ? null : (
+                    <>
+                      <div className={styles.usageSectionHead}>
+                        <h4 className={styles.dialogSectionTitle}>{t('usageModels')}</h4>
+                        {monthScoped ? <span className={styles.sectionMeta}>{t('range30d')}</span> : null}
+                      </div>
+                      <table className={styles.usageTable}>
+                        <thead>
+                          <tr>
+                            <th>{t('usageModel')}</th>
+                            <th>{t('usageTokens')}</th>
+                            <th>{t('usageShare')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {report.models.models.map(model => (
+                            <tr key={model.model}>
+                              <td>{model.model}</td>
+                              <td>{tokenText(model.tokens)}</td>
+                              <td>{shareText(model.tokens, report.models.tokens)}</td>
+                            </tr>
+                          ))}
+                          <tr>
+                            <td>{t('usageCalls')}</td>
+                            <td>{String(report.models.calls)}</td>
+                            <td>—</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </>
+                  )}
+
+                  {report.tools.tools.length === 0 ? null : (
+                    <>
+                      <div className={styles.usageSectionHead}>
+                        <h4 className={styles.dialogSectionTitle}>{t('usageTools')}</h4>
+                        {monthScoped ? <span className={styles.sectionMeta}>{t('range30d')}</span> : null}
+                      </div>
+                      <table className={styles.usageTable}>
+                        <thead>
+                          <tr>
+                            <th>{t('toolName')}</th>
+                            <th>{t('toolCalls')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {report.tools.tools.map(tool => (
+                            <tr key={tool.tool}>
+                              <td>{tool.tool}</td>
+                              <td>{String(tool.calls)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
+
+                  <dl className={styles.facts}>
+                    <Fact label={t('usageActiveDays')} value={String(activeDays)} />
+                    <Fact
+                      label={t('usagePeakDay')}
+                      value={`${tokenText(report.activity.peakDayTokens)}${report.activity.peakDay === undefined ? '' : ` (${report.activity.peakDay})`}`}
+                    />
+                    <Fact
+                      label={t('usageStreak')}
+                      value={`${String(report.activity.currentStreakDays)} / ${String(report.activity.longestStreakDays)}`}
+                    />
+                    <Fact label={t('usageUsageTime')} value={`${(report.activity.totalUsageMs / HOUR_MS).toFixed(1)} h`} />
+                    {report.credits.cacheHitRate === undefined
+                      ? null
+                      : (
+                        <Fact
+                          label={monthScoped ? `${t('usageCacheHit')} (${t('range30d')})` : t('usageCacheHit')}
+                          value={`${(report.credits.cacheHitRate * 100).toFixed(1)}%`}
+                        />
+                      )}
+                    {decode === undefined ? null : <Fact label={t('usageDecodeSpeed')} value={decode} />}
+                  </dl>
+
+                  {report.subscriptions.length === 0 ? null : (
+                    <>
+                      <h4 className={styles.dialogSectionTitle}>{t('subscription')}</h4>
+                      <dl className={styles.facts}>
+                        {report.subscriptions.map(subscription => (
+                          <Fact
+                            key={subscription.productName}
+                            label={subscription.productName}
+                            value={[
+                              subscription.renewTime === undefined ? undefined : t('subscriptionRenew', { time: subscription.renewTime }),
+                              subscription.billingCycle === undefined ? undefined : t('subscriptionCycle', { cycle: subscription.billingCycle }),
+                              subscription.autoRenew ? t('subscriptionAutoRenew') : undefined,
+                            ].filter((entry): entry is string => entry !== undefined).join(' · ')}
+                          />
+                        ))}
+                      </dl>
+                    </>
+                  )}
+                </div>
+              )}
+        </div>
+      </div>
     </section>
   )
 }

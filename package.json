@@ -1,6 +1,6 @@
 {
   "name": "dsh-zhipu-plan",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "description": "Zhipu coding-plan sign-in and quota/usage page for DeepSeek Harness, installed as an out-of-tree profile bundle",

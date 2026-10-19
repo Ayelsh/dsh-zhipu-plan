@@ -44,7 +44,7 @@ interface PlanNamespace {
   cancelLogin: () => Promise<RemoteResult<void>>
   logout: () => Promise<RemoteResult<void>>
   quota: () => Promise<RemoteResult<PlanQuota>>
-  usage: (range: PlanUsageRange, timeZone: string) => Promise<RemoteResult<PlanUsageReport>>
+  usage: (range: PlanUsageRange, timeZone: string, signal?: AbortSignal) => Promise<RemoteResult<PlanUsageReport>>
   resetStatus: () => Promise<RemoteResult<PlanResetStatus>>
   useReset: (kind: PlanResetKind, idempotencyKey: string) => Promise<RemoteResult<void>>
   requestResetOpportunity: (
@@ -124,10 +124,16 @@ export function apply(ctx: ClientContext): void {
         const result = await planNamespace(ctx).quota()
         return result.ok ? result.value : undefined
       },
-      loadUsage: async (range) => {
+      loadUsage: async (range, signal) => {
         // The zone travels with the request because the host buckets days by
-        // the calendar the user reads dates in, not by its own.
-        const result = await planNamespace(ctx).usage(range, Intl.DateTimeFormat().resolvedOptions().timeZone)
+        // the calendar the user reads dates in, not by its own. The caller's
+        // signal rides the Remote carrier's optional cancellation argument, so
+        // switching windows withdraws the read the previous window started.
+        const result = await planNamespace(ctx).usage(
+          range,
+          Intl.DateTimeFormat().resolvedOptions().timeZone,
+          signal,
+        )
         return result.ok ? result.value : undefined
       },
       loadResetStatus: async () => {

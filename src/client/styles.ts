@@ -45,7 +45,8 @@ export const STYLE_CLASSES = [
   'dialogResetMeta', 'countPill',
   // Labelled facts, and the usage tables behind the quota.
   'facts', 'factRow', 'factLabel', 'factValue',
-  'rangeTabs', 'rangeTab', 'usageSection', 'usageBlock', 'usageTable',
+  'rangeTabs', 'rangeTab', 'usagePanel', 'usageSwap', 'usageProgress', 'usageStatus',
+  'usageFailure', 'usageRetry', 'usageSection', 'usageSectionHead', 'usageBlock', 'usageTable',
   // Signing in: the card, the two pickers, the authorize notice, its actions.
   'signInCard', 'pickers', 'signInActions', 'pickerRow', 'picker',
   'authorize', 'authorizeLink',
@@ -570,6 +571,7 @@ table td:first-child .dzp-skeleton { margin-left: 0; }
   background: var(--dsw-alias-interactive-bg-hover);
 }
 .dzp-rangeTab {
+  position: relative;
   border: 0;
   padding: 4px 10px;
   border-radius: calc(var(--dsw-radius-sm) - 2px);
@@ -587,11 +589,106 @@ table td:first-child .dzp-skeleton { margin-left: 0; }
 }
 .dzp-rangeTab:hover { color: var(--dsw-alias-label-primary); }
 .dzp-rangeTab:active { transform: scale(0.96); }
-.dzp-rangeTab[aria-pressed='true'] {
+.dzp-rangeTab[aria-selected='true'] {
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
   font-weight: 500;
   box-shadow: var(--dsw-shadow-lv1);
+}
+/* While the chosen window is still being read, its own tab carries the quiet
+   mark that says the strip is waiting. It rides inside the pill, so the
+   control's geometry never moves. */
+.dzp-rangeTab[data-loading='true']::after {
+  content: '';
+  position: absolute;
+  inset-inline: 8px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--dsw-alias-label-tertiary);
+  animation: dzp-tabwait 900ms var(--dzp-ease) infinite;
+}
+
+/* ---- reading a window --------------------------------------------------- */
+
+/* The panel is the tabpanel: one window's answer, and the motion and copy that
+   say while that answer is on its way. */
+.dzp-usagePanel { min-width: 0; border-radius: var(--dsw-radius-sm); outline: none; }
+/* The chosen window's content travels in from the side the selection moved
+   towards, so a switch has a direction rather than only a destination. */
+.dzp-usageSwap { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dzp-usageSwap[data-direction='next'] { animation: dzp-swap-next var(--dzp-base) var(--dzp-ease-out) both; }
+.dzp-usageSwap[data-direction='prev'] { animation: dzp-swap-prev var(--dzp-base) var(--dzp-ease-out) both; }
+/* An unanswered read is reported at the top of its own surface, not in the
+   control: the tab is the control, this is the status. The sweep runs on one
+   composited layer and never moves the layout around it. */
+.dzp-usageProgress {
+  height: 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+.dzp-usageProgress::before {
+  content: '';
+  display: block;
+  width: 36%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--dsw-alias-label-primary-dimmed), transparent);
+  animation: dzp-sweep 1.05s var(--dzp-ease) infinite;
+}
+.dzp-usageStatus {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.005em;
+  color: var(--dsw-alias-label-tertiary);
+}
+/* A failed read says so where its figures would have rendered, and offers the
+   one action that can change the outcome. */
+.dzp-usageFailure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dzp-usageRetry {
+  border: 0;
+  padding: 2px 8px;
+  border-radius: calc(var(--dsw-radius-sm) - 2px);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  letter-spacing: 0.005em;
+  cursor: pointer;
+  transition:
+    background var(--dzp-base) var(--dzp-ease),
+    color var(--dzp-base) var(--dzp-ease),
+    transform var(--dzp-fast) var(--dzp-ease-out);
+}
+.dzp-usageRetry:hover { color: var(--dsw-alias-label-primary); }
+.dzp-usageRetry:active { transform: scale(0.96); }
+/* The answered surface settles in once; while a fresh answer is read over it,
+   it dims rather than disappearing, so the old figures say "stale", not "gone".
+   The backwards fill leaves the opacity property free for that refreshing state. */
+.dzp-usageSection {
+  transition: opacity var(--dzp-base) var(--dzp-ease);
+  animation: dzp-resolve var(--dzp-base) var(--dzp-ease-out) backwards;
+}
+.dzp-usageSection[data-refreshing='true'] { opacity: 0.55; }
+/* A heading and the span it covers share one baseline. */
+.dzp-usageSectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 /* ---- signing in -------------------------------------------------------- */
@@ -648,7 +745,8 @@ table td:first-child .dzp-skeleton { margin-left: 0; }
 /* ---- focus ------------------------------------------------------------- */
 
 /* Pointer users never see a ring; keyboard users always do. */
-.dzp-rangeTab:focus-visible, .dzp-resetEntry:focus-visible, .dzp-resetBadge:focus-visible {
+.dzp-rangeTab:focus-visible, .dzp-usagePanel:focus-visible, .dzp-usageRetry:focus-visible,
+.dzp-resetEntry:focus-visible, .dzp-resetBadge:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-2), 0 0 0 4px var(--dsw-alias-label-primary-dimmed);
 }
@@ -671,6 +769,28 @@ table td:first-child .dzp-skeleton { margin-left: 0; }
   0%, 100% { opacity: 0.35; }
   50% { opacity: 0.6; }
 }
+/* A read that has not answered yet: a sweep across the top line, the waiting
+   mark under the chosen tab, and the content that resolves into place. */
+@keyframes dzp-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(280%); }
+}
+@keyframes dzp-tabwait {
+  0%, 100% { opacity: 0.2; transform: scaleX(0.4); }
+  50% { opacity: 0.75; transform: scaleX(1); }
+}
+@keyframes dzp-swap-next {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes dzp-swap-prev {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes dzp-resolve {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 /* Reduced motion keeps every state change and drops the travel: the same
    information, without the movement. */
@@ -682,7 +802,8 @@ table td:first-child .dzp-skeleton { margin-left: 0; }
     transition-duration: 120ms !important;
   }
   .dzp-quotaBarFill { transition: none !important; }
-  .dzp-quotaCard:active, .dzp-resetEntry:active, .dzp-resetBadge:active, .dzp-rangeTab:active {
+  .dzp-quotaCard:active, .dzp-resetEntry:active, .dzp-resetBadge:active, .dzp-rangeTab:active,
+  .dzp-usageRetry:active {
     transform: none !important;
   }
 }
@@ -697,7 +818,7 @@ table td:first-child .dzp-skeleton { margin-left: 0; }
   .dzp-quotaCard, .dzp-hero, .dzp-signInCard, .dzp-picker, .dzp-rangeTabs {
     box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l3);
   }
-  .dzp-rangeTab[aria-pressed='true'] { box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l3); }
+  .dzp-rangeTab[aria-selected='true'] { box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l3); }
 }
 `
 

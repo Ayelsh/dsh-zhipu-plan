@@ -107,18 +107,22 @@ const CALENDAR_DAYS = 366
  *
  * The monitor refuses a longer window outright instead of truncating it, so a
  * year-long range has to be read in windows of at most these spans. `activity`
- * is the generous one: it answers a whole year in a single call.
+ * is the generous one: it answers a whole year in a single call. The other
+ * families publish a 30-day ceiling (`incorrect time format or time range
+ * exceeds limit`, `maximum 30 days`); a 31-32 day window only happens to pass
+ * because the endpoint grades the shorter side of the range, so 30 keeps a read
+ * inside the published cap instead of on a boundary the monitor never promised.
  */
 export const ACTIVITY_CHUNK_DAYS = 366
-export const USAGE_CHUNK_DAYS = 32
-export const CREDIT_CHUNK_DAYS = 31
+export const USAGE_CHUNK_DAYS = 30
+export const CREDIT_CHUNK_DAYS = 30
 
 /**
  * The windows one range is read in, newest first.
  *
- * The monitor caps a window at 31-32 days for the usage, credit, and
- * performance families — it refuses a longer one outright rather than
- * truncating it — while the activity summary answers a whole year in one call.
+ * The monitor caps a window at 30 days for the usage, credit, and performance
+ * families — it refuses a longer one outright rather than truncating it — while
+ * the activity summary answers a whole year in one call.
  * A year-long range is therefore read family by family: the activity summary as
  * one window, and the other families as consecutive windows the caller merges.
  * The chunks abut rather than overlap, so their figures add without double

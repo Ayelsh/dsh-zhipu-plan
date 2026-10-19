@@ -51,6 +51,9 @@ const SCENARIOS = [
   ['a', 'panel'],
   ['d', 'waiting'],
   ['e', 'signin'],
+  ['f', 'reading'],
+  ['g', 'read-failed'],
+  ['h', 'all-time'],
 ]
 const THEMES = [['plan-page.html', 'light'], ['plan-page-dark.html', 'dark']]
 

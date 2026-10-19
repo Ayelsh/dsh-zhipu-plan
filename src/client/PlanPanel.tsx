@@ -54,8 +54,8 @@ export interface PlanPanelProps {
   readonly logout: () => Promise<void>
   /** Read the plan quota snapshot. */
   readonly loadQuota: () => Promise<PlanQuota | undefined>
-  /** Read the window's server-side usage; undefined when the read failed. */
-  readonly loadUsage: (range: PlanUsageRange) => Promise<PlanUsageReport | undefined>
+  /** Read the window's server-side usage; the signal cancels it when the window changes. */
+  readonly loadUsage: (range: PlanUsageRange, signal?: AbortSignal) => Promise<PlanUsageReport | undefined>
   /** Read the resets on hand. */
   readonly loadResetStatus: () => Promise<PlanResetStatus | undefined>
   /** Spend one reset; the key makes a retried click idempotent. */

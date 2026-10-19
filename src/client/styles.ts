@@ -674,14 +674,11 @@ table td:first-child .dzp-skeleton { margin-left: 0; }
 }
 .dzp-usageRetry:hover { color: var(--dsw-alias-label-primary); }
 .dzp-usageRetry:active { transform: scale(0.96); }
-/* The answered surface settles in once; while a fresh answer is read over it,
-   it dims rather than disappearing, so the old figures say "stale", not "gone".
-   The backwards fill leaves the opacity property free for that refreshing state. */
+/* The answered surface settles in once, in the same frame its figures replace
+   the loading placeholder. */
 .dzp-usageSection {
-  transition: opacity var(--dzp-base) var(--dzp-ease);
   animation: dzp-resolve var(--dzp-base) var(--dzp-ease-out) backwards;
 }
-.dzp-usageSection[data-refreshing='true'] { opacity: 0.55; }
 /* A heading and the span it covers share one baseline. */
 .dzp-usageSectionHead {
   display: flex;

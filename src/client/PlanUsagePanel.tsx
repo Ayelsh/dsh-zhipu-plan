@@ -8,14 +8,13 @@
  * The surface is read-only: it chooses a window, reads it, and reports what came
  * back — including the wait for it.
  *
- * Each window owns its own read state. Switching tabs answers immediately: the
- * chosen tab is pressed and the content swaps direction-aware in the same
- * frame, while a read that is actually running shows a progress line and the
- * copy that says so. A window that already answered keeps its answer across a
- * revisit; a stale one keeps showing while it is read again, so the surface
- * never flashes empty between two answers. The in-flight read is aborted when
- * the chosen window changes again, because the answer for a window nobody is
- * looking at is work worth dropping.
+ * Each window owns its own read state, and a switch holds the loading
+ * placeholder until the chosen window's own answer arrives: the pressed tab,
+ * the direction-aware swap, the progress line, the spinner, and the skeleton
+ * all answer in the same frame, and nothing of the window that was left behind
+ * stays on screen while its replacement is read. The in-flight read is aborted
+ * when the chosen window changes again, because the answer for a window nobody
+ * is looking at is work worth dropping.
  *
  * @module dsh-zhipu-plan/client/PlanUsagePanel
  */
@@ -38,23 +37,13 @@ const HOUR_MS = 3_600_000
 /** How many stand-in rows the tables show while the window is being read. */
 const SKELETON_ROWS = 3
 
-/**
- * How long an answered window stays fresh enough to answer a revisit without a
- * read. A reading is a snapshot of usage that only grows; a minute keeps a
- * back-and-forth between two tabs from re-reading while still letting a
- * reference that is a moment old catch up.
- */
-const REVISIT_FRESH_MS = 60_000
-
 /** The direction the content travels when the chosen window moves. */
 type SwapDirection = 'none' | 'next' | 'prev'
 
-/** One window's read state; the answer is kept across a refresh so the surface never flashes empty. */
+/** One window's read state; the answer is carried only once it has arrived. */
 interface RangeLoad {
   readonly phase: 'loading' | 'ready' | 'failed'
   readonly report?: PlanUsageReport
-  /** Wall-clock time of the answer, so a revisit knows whether it is still fresh. */
-  readonly loadedAt?: number
 }
 
 /** Percentage text for one share of the window total. */
@@ -114,16 +103,6 @@ function SkeletonRows(props: { readonly columns: number }): ReactNode {
   )
 }
 
-/** The state a window is left in when its read would not answer. */
-function failedLoad(previous: RangeLoad | undefined): RangeLoad {
-  return previous?.report === undefined ? { phase: 'failed' } : { phase: 'failed', report: previous.report }
-}
-
-/** The state a window is put in while its read runs, keeping an earlier answer on screen. */
-function loadingLoad(previous: RangeLoad | undefined): RangeLoad {
-  return previous?.report === undefined ? { phase: 'loading' } : { phase: 'loading', report: previous.report }
-}
-
 /**
  * Render the window's usage: models, tools, activity, and subscriptions.
  * @param props - copy seat and the host read.
@@ -142,8 +121,6 @@ export function PlanUsagePanel(props: {
   const [attempt, setAttempt] = useState(0)
   const range = swap.range
   const tabRefs = useRef(new Map<PlanUsageRange, HTMLButtonElement>())
-  const latestLoads = useRef(loads)
-  latestLoads.current = loads
   const baseId = useId()
   const panelId = `${baseId}-panel`
   const tabId = (candidate: PlanUsageRange): string => `${baseId}-tab-${candidate}`
@@ -156,29 +133,27 @@ export function PlanUsagePanel(props: {
     })
   }
 
-  // One read per chosen window. A fresh answer answers the switch by itself;
-  // anything else clears the window's own state to loading, keeps the previous
-  // answer (if any) on screen, and aborts whatever the previous window was
-  // still reading.
+  // One read per chosen window: the switch puts the window into its loading
+  // state at once and the placeholder holds until this window's own answer
+  // lands, and the read the previous window left running is aborted, because
+  // the answer for a window nobody is looking at is work worth dropping.
   useEffect(() => {
-    const cached = latestLoads.current[range]
-    if (cached?.phase === 'ready' && Date.now() - (cached.loadedAt ?? 0) < REVISIT_FRESH_MS) return
     const controller = new AbortController()
     let current = true
-    setLoads(previous => ({ ...previous, [range]: loadingLoad(previous[range]) }))
+    setLoads(previous => ({ ...previous, [range]: { phase: 'loading' } }))
     loadUsage(range, controller.signal).then(
       (loaded) => {
         if (!current) return
         setLoads(previous => ({
           ...previous,
           [range]: loaded === undefined
-            ? failedLoad(previous[range])
-            : { phase: 'ready', report: loaded, loadedAt: Date.now() },
+            ? { phase: 'failed' }
+            : { phase: 'ready', report: loaded },
         }))
       },
       () => {
         if (!current) return
-        setLoads(previous => ({ ...previous, [range]: failedLoad(previous[range]) }))
+        setLoads(previous => ({ ...previous, [range]: { phase: 'failed' } }))
       },
     )
     return () => {
@@ -201,11 +176,9 @@ export function PlanUsagePanel(props: {
   }
 
   const current = loads[range]
-  const report = current?.report
+  const report = current?.phase === 'ready' ? current.report : undefined
   const loading = current === undefined || current.phase === 'loading'
   const failed = current?.phase === 'failed'
-  const refreshing = loading && report !== undefined
-  const skeleton = loading && report === undefined
   // Active days are the days that reported usage, not every day the monitor
   // pads the series with: a year of zero-token days is still one active day.
   const activeDays = report === undefined
@@ -266,15 +239,6 @@ export function PlanUsagePanel(props: {
         <div key={range} className={styles.usageSwap} data-direction={swap.direction}>
           {loading ? <div className={styles.usageProgress} aria-hidden="true" /> : null}
 
-          {refreshing
-            ? (
-              <p className={styles.usageStatus} role="status">
-                <span className={styles.spinner} aria-hidden="true" />
-                <span>{t('usageLoading')}</span>
-              </p>
-            )
-            : null}
-
           {failed
             ? (
               <div className={styles.usageFailure} role="status">
@@ -290,7 +254,7 @@ export function PlanUsagePanel(props: {
             )
             : null}
 
-          {skeleton
+          {loading
             ? (
               <div className={styles.usageBlock} role="status">
                 <p className={styles.usageStatus}>
@@ -316,7 +280,7 @@ export function PlanUsagePanel(props: {
             : empty
               ? <p className={styles.emptyState} role="status">{t('usageEmpty')}</p>
               : (
-                <div className={styles.usageSection} data-refreshing={refreshing ? 'true' : undefined}>
+                <div className={styles.usageSection}>
                   {report.models.models.length === 0 ? null : (
                     <>
                       <div className={styles.usageSectionHead}>

@@ -25,7 +25,7 @@
     "client-smoke": "node scripts/client-smoke.mjs",
     "logic-freeze": "node scripts/logic-freeze.mjs",
     "preview": "node scripts/preview.mjs",
-    "prepare": "node scripts/build.mjs"
+    "prepack": "node scripts/build.mjs"
   },
   "dsh": {
     "bundle": {

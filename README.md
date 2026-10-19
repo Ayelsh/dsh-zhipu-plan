@@ -51,7 +51,7 @@ The asset is the packed package: `lib/index.js`, `lib/typert.js`, `lib/client.js
 dsh plugin --profile <profile> add github:Ayelsh/dsh-zhipu-plan
 ```
 
-A source install checks the repository out and runs its `prepare` script (`node scripts/build.mjs`) before packing, so `lib/*.js` is built from `src/` instead of missing from the installed package. The build needs `esbuild` from the package's `devDependencies`; pnpm ≥ 10 blocks dependency build scripts until the profile allows them, so a profile that refuses the script installs a package without artifacts. Use the prebuilt tarball above in that case.
+A source install packs the repository exactly as it is. The build artifacts — `lib/index.js`, `lib/typert.js`, `lib/client.js` — are committed, so the installed package carries them and no build script runs on your machine. Nothing in `src/` is compiled at install time; the market still prefers the prebuilt tarball above because a source checkout is slower to download than the release asset.
 
 The Host restarts the affected plugin graph; a full application restart is the reliable way to pick up a newly installed bundle. Then open **Settings → 智谱套餐**, choose the deployment and plan kind, and sign in.
 
@@ -69,7 +69,7 @@ pnpm run preview    # writes preview/plan-page.html and preview/plan-page-dark.h
 pnpm pack           # writes dsh-zhipu-plan-<version>.tgz
 ```
 
-`prepare` runs the build, so installing this repository as a dependency produces the same artifacts. The release asset is that tarball renamed to the version-free `dsh-zhipu-plan.tgz`, which is what keeps the `releases/latest/download/dsh-zhipu-plan.tgz` address stable across versions.
+`lib/` is committed, because a source install packs only git-tracked files: `pnpm run build` refreshes it after a source change and `prepack` rebuilds it before `pnpm pack`, so a release never packs stale artifacts — commit the rebuilt `lib/` with the source change that caused it. The release asset is that tarball renamed to the version-free `dsh-zhipu-plan.tgz`, which is what keeps the `releases/latest/download/dsh-zhipu-plan.tgz` address stable across versions.
 
 The build runs esbuild directly rather than the repository's client preset, because this package is built outside that repository; it then checks the artifacts it produced: the browser bundle only `require`s specifiers the shell's module table answers, every class name the markup uses exists in the injected stylesheet, both dictionaries carry the same keys, and every Remote method the published wire and the service source name exist on both sides. `pnpm run verify` adds the regression gates: `logic-freeze` pins the dictionary, logic identifiers, poll timings, and host reset request a presentation-only change must not move, `client-smoke` materializes the browser bundle against the shell's module table, and the harness loader must accept the published Typert manifest.
 
@@ -80,6 +80,7 @@ The build runs esbuild directly rather than the repository's client preset, beca
 | `src/host/` | The `zhipuPlan` service: relay sign-in, plan-credential resolution, monitor and reset reads. Ported from the in-tree package of the same shape. |
 | `src/wire/` | The generated Typert faces. `typert-host.js` is the manifest `@deepseek-ai/dsh-typert-loader` registers from any mounted package exporting `./typert`; `typert-remote-client.js` is the browser contribution this plugin mounts through `ctx.remote.$mount`. |
 | `src/client/` | The Settings page. |
+| `lib/` | Committed build output: `index.js` (host), `typert.js` (wire face), `client.js` (browser). Written by `pnpm run build`; never edited by hand. |
 | `cordis.patch.yml` | The bundle layer: the authorization seam and this plugin, insert-only. |
 
 ### Why the wire faces are copied rather than generated here

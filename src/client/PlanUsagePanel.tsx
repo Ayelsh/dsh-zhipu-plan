@@ -5,6 +5,8 @@
  * holds.
  *
  * Every figure here is the server's; nothing is derived or estimated locally.
+ * The surface is read-only: it chooses a window, reads it, and reports what came
+ * back — including the wait for it.
  *
  * @module dsh-zhipu-plan/client/PlanUsagePanel
  */
@@ -13,7 +15,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { PlanLocaleKey } from './locales.ts'
 import type { PlanDecodeSpeed, PlanUsageRange, PlanUsageReport } from './plan-types.ts'
 import { tokenText } from './token-text.ts'
-import { styles } from './styles.ts'
+import { staggerAt, styles } from './styles.ts'
 
 /** This page's copy seat. */
 type Translate = (key: PlanLocaleKey, params?: Record<string, unknown>) => string
@@ -23,6 +25,9 @@ const RANGES: readonly PlanUsageRange[] = ['7d', '30d', 'all']
 
 /** Milliseconds in one hour, for the "time spent" figure. */
 const HOUR_MS = 3_600_000
+
+/** How many stand-in rows the tables show while the window is being read. */
+const SKELETON_ROWS = 3
 
 /** Percentage text for one share of the window total. */
 function shareText(tokens: number, total: number): string {
@@ -61,6 +66,23 @@ function Fact(props: { readonly label: string; readonly value: string }): ReactN
       <dt className={styles.factLabel}>{props.label}</dt>
       <dd className={styles.factValue}>{props.value}</dd>
     </div>
+  )
+}
+
+/** The rows a table shows while the window is being read. */
+function SkeletonRows(props: { readonly columns: number }): ReactNode {
+  return (
+    <>
+      {Array.from({ length: SKELETON_ROWS }, (_, row) => (
+        <tr key={row} aria-hidden="true">
+          {Array.from({ length: props.columns }, (_, column) => (
+            <td key={column}>
+              <span className={styles.skeleton} data-cell="true" style={staggerAt(row)} />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
   )
 }
 
@@ -120,11 +142,25 @@ export function PlanUsagePanel(props: {
         </div>
       </div>
       {failed
-        ? <p className={styles.warning}>{t('usageFailed')}</p>
+        ? <p className={styles.warning} role="status">{t('usageFailed')}</p>
         : report === undefined
-          ? <p className={styles.status}>{t('usageLoading')}</p>
+          ? (
+            <div className={styles.usageBlock} role="status">
+              <p className={styles.status}>{t('usageLoading')}</p>
+              <table className={styles.usageTable}>
+                <thead>
+                  <tr>
+                    <th>{t('usageModel')}</th>
+                    <th>{t('usageTokens')}</th>
+                    <th>{t('usageShare')}</th>
+                  </tr>
+                </thead>
+                <tbody><SkeletonRows columns={3} /></tbody>
+              </table>
+            </div>
+          )
           : empty
-            ? <p className={styles.status}>{t('usageEmpty')}</p>
+            ? <p className={styles.emptyState} role="status">{t('usageEmpty')}</p>
             : (
               <div className={styles.usageSection}>
                 <h4 className={styles.dialogSectionTitle}>{t('usageModels')}</h4>

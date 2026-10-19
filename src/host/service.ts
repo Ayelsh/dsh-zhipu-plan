@@ -22,13 +22,20 @@ import z from '@deepseek-ai/schemastery'
 import { zhipuPlanError } from './errors.ts'
 import { LoginError, runLoginAttempt } from './login.ts'
 import {
+  ACTIVITY_CHUNK_DAYS,
+  CREDIT_CHUNK_DAYS,
+  USAGE_CHUNK_DAYS,
   fetchActivity,
   fetchCreditSummary,
   fetchDecodeSpeed,
   fetchModelUsage,
   fetchSubscriptionList,
   fetchToolUsage,
+  mergeDecodeSpeed,
+  mergeModelUsage,
+  mergeToolUsage,
   usageWindow,
+  usageWindows,
 } from './monitor.ts'
 import { PlanKeyError, resolvePlanKey } from './plan-key.ts'
 import { fetchQuota, pickPrimaryLimit } from './quota.ts'
@@ -65,7 +72,31 @@ export { createPollToken, RelayError, ZhipuAuthRelay, type RelayFlow, type Relay
 export {
   fetchResetStatus, markResetHistoryRead, requestResetOpportunity, useReset, type ResetReadInput,
 } from './reset.ts'
-export type * from './types.ts'
+
+/**
+ * Read every item through one operation, a few at a time.
+ *
+ * A year-long usage range is a dozen windows per family; firing them all at once
+ * would leave the last ones waiting past the deadline a single request is given,
+ * and reading them one by one would spend seconds on round trips. Small batches
+ * keep each wave inside the deadline without serialising them.
+ *
+ * @param items - the items to read.
+ * @param size - how many may be in flight at once.
+ * @param read - the operation to run for one item.
+ * @returns the readings, in the items' order.
+ */
+async function inBatches<T, R>(
+  items: readonly T[],
+  size: number,
+  read: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const readings: R[] = []
+  for (let index = 0; index < items.length; index += size) {
+    readings.push(...await Promise.all(items.slice(index, index + size).map(item => read(item))))
+  }
+  return readings
+}
 
 /** Service configuration; every field names a third-party address or a deadline. */
 export interface Config {
@@ -348,17 +379,47 @@ export class ZhipuPlanService extends TypertRemoteService {
       requestTimeoutMs: this.config.requestTimeoutMs,
       signal,
     }
-    const window = usageWindow(range, timeZone, Date.now())
+    // The activity summary answers a whole year in one call; the usage, credit,
+    // and performance families cap a window at roughly a month, so a year-long
+    // range is read a month at a time and the parts are merged below.
+    const activityWindows = usageWindows(range, timeZone, Date.now(), ACTIVITY_CHUNK_DAYS)
+    const usageWindowsOfRange = usageWindows(range, timeZone, Date.now(), USAGE_CHUNK_DAYS)
+    const creditWindows = usageWindows(range, timeZone, Date.now(), CREDIT_CHUNK_DAYS)
     try {
-      const [models, tools, activity, credits, decodeSpeed, subscriptions] = await Promise.all([
-        fetchModelUsage(read, window),
-        fetchToolUsage(read, window),
-        fetchActivity(read, window),
-        fetchCreditSummary(read, window),
-        fetchDecodeSpeed(read, window),
+      // Chunked families are read in small parallel batches: a year is a dozen
+      // requests each, and firing them all at once would outlast the window one
+      // request is given.
+      const models = mergeModelUsage(await inBatches(
+        usageWindowsOfRange,
+        4,
+        async window => fetchModelUsage(read, window, read),
+      ))
+      const tools = mergeToolUsage(await inBatches(
+        usageWindowsOfRange,
+        4,
+        async window => fetchToolUsage(read, window, read),
+      ))
+      const decodeSpeed = mergeDecodeSpeed(await inBatches(
+        usageWindowsOfRange,
+        4,
+        async window => fetchDecodeSpeed(read, window, read),
+      ))
+      const [activity, credits, subscriptions] = await Promise.all([
+        fetchActivity(read, activityWindows[0] ?? usageWindow(range, timeZone, Date.now())),
+        fetchCreditSummary(read, creditWindows[0] ?? usageWindow(range, timeZone, Date.now())),
         fetchSubscriptionList(read, account.accessToken),
       ])
-      return { deployment: account.deployment, range, fetchedAt: Date.now(), models, tools, activity, credits, decodeSpeed, subscriptions }
+      return {
+        deployment: account.deployment,
+        range,
+        fetchedAt: Date.now(),
+        models,
+        tools,
+        activity,
+        credits,
+        decodeSpeed,
+        subscriptions,
+      }
     } catch (error) {
       if (signal.aborted) throw error
       throw zhipuPlanError('zhipu-plan/network', 'the plan monitor could not be reached', { cause: error })

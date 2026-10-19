@@ -113,23 +113,23 @@ ${preview.STYLE_SHEET}
 /* Preview chrome: the two shell primitives this page uses are stood in for here. */
 body { margin: 0; padding: 24px; background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font-family: var(--dsw-font-family); }
 .dzp-preview-page { display: flex; flex-direction: column; gap: 10px; }
-.dzp-preview-host { max-width: 860px; padding: 20px; border: 0.5px solid var(--dsw-alias-border-secondary); border-radius: 14px; background: var(--dsw-alias-bg-base); }
+.dzp-preview-host { max-width: 860px; padding: 20px; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: 14px; background: var(--dsw-alias-bg-base); }
 .dzp-preview-label { font-size: 12px; color: var(--dsw-alias-label-tertiary); margin: 18px 0 0; }
 .dzp-preview-button { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; border: 0.5px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; font-size: 12px; cursor: pointer; }
 .dzp-preview-sm { height: 26px; padding: 0 10px; }
 .dzp-preview-md { height: 32px; padding: 0 14px; }
-.dzp-preview-primary { background: var(--dsw-alias-button-primary-fill); border-color: transparent; color: var(--dsw-alias-label-primary-inverted); }
+.dzp-preview-primary { background: var(--dsw-alias-button-primary-fill); border-color: transparent; color: var(--dsw-alias-label-primary-foreground); }
 .dzp-preview-outline { background: none; }
 .dzp-preview-ghost { background: none; border-color: transparent; color: var(--dsw-alias-label-secondary); }
 .dzp-preview-modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
 .dzp-preview-modal-mask { position: absolute; inset: 0; background: var(--dsw-alias-bg-mask-1); }
-.dzp-preview-modal-dialog { position: relative; width: 460px; max-width: 92vw; border-radius: 14px; background: var(--dsw-alias-bg-overlay); border: 0.5px solid var(--dsw-alias-border-secondary); box-shadow: 0 12px 40px rgba(0,0,0,0.18); }
+.dzp-preview-modal-dialog { position: relative; width: 460px; max-width: 92vw; border-radius: 14px; background: var(--dsw-alias-bg-overlay); border: 0.5px solid var(--dsw-alias-border-l1); box-shadow: var(--dsw-shadow-lv2); }
 .dzp-preview-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 0.5px solid var(--dsw-alias-border-secondary); }
 .dzp-preview-modal-title { font-size: 14px; font-weight: 600; }
 .dzp-preview-modal-body { padding: 16px; }
 </style>
 </head>
-<body>
+<body${dark ? ' data-ds-dark-theme' : ''}>
 <div class="dzp-preview-page">
   <p class="dzp-preview-label">已登录 / signed in（中文）</p>
   <div class="dzp-preview-host" id="a">${signedIn}</div>
@@ -150,3 +150,6 @@ mkdirSync(dirname(OUT), { recursive: true })
 writeFileSync(OUT, page)
 console.log(`preview: wrote ${OUT}`)
 console.log(`preview: ${signedIn.length} bytes of signed-in markup, ${dialog.length} of dialog markup`)
+// jsdom's visual mode leaves a frame loop running, so the process does not
+// drain on its own; the file is written and flushed by now.
+process.exit(0)

@@ -12,6 +12,12 @@
  * lists every bucket's remaining share and the resets the deployment has
  * granted, with the countdown to their expiry.
  *
+ * Presentation follows the page's own sheet: the cards are the one repeated
+ * surface here, so they are raised and staggered into place, while the dialog's
+ * lists are plain rows separated by hairlines so a list reads as one surface.
+ * The bar carries the remaining share as a transform rather than a width, so a
+ * new snapshot animates without re-laying out.
+ *
  * @module dsh-zhipu-plan/client/QuotaSection
  */
 
@@ -23,7 +29,7 @@ import {
   LIMIT_COLORS, fiveHourLimit, isLimitFull, remainingPercentage, remainingText, resetTimeText, toolLimit, weeklyLimit,
 } from './quota.ts'
 import { canReset, countdownText, remainingSeconds, type ResetState, type ResetWindowState } from './reset.ts'
-import { styles } from './styles.ts'
+import { shareScale, staggerAt, styles } from './styles.ts'
 
 /** This page's copy seat. */
 type Translate = (key: PlanLocaleKey, params?: Record<string, unknown>) => string
@@ -69,6 +75,19 @@ function cardsOf(quota: PlanQuota | undefined): QuotaCard[] {
 }
 
 /**
+ * The bar under a bucket: the remaining share, painted at full width and scaled
+ * to that share so the change animates on the compositor.
+ */
+function QuotaBar(props: { readonly remaining: number | undefined; readonly color: string }): ReactNode {
+  const { remaining, color } = props
+  return (
+    <div className={styles.quotaBar}>
+      <div className={styles.quotaBarFill} style={{ ...shareScale(remaining), backgroundColor: color }} />
+    </div>
+  )
+}
+
+/**
  * The reset action a card shows next to its label: the entry that opens the
  * dialog, a spinner while a reset runs, or the completion mark afterwards.
  */
@@ -89,7 +108,12 @@ function ResetAction(props: {
     )
   }
   if (state.status === 'processing' && busy) {
-    return <span className={styles.resetPending}>{t(kind === 'five_hour' ? 'resetProcessingFiveHour' : 'resetProcessingWeek')}</span>
+    return (
+      <span className={styles.resetPending} role="status">
+        <span className={styles.spinner} aria-hidden="true" />
+        {t(kind === 'five_hour' ? 'resetProcessingFiveHour' : 'resetProcessingWeek')}
+      </span>
+    )
   }
   if (!canReset(state)) return null
   return (
@@ -112,13 +136,15 @@ function QuotaCardView(props: {
   readonly card: QuotaCard
   readonly state: ResetWindowState | undefined
   readonly busy: boolean
+  readonly index: number
   readonly onOpenDialog: () => void
 }): ReactNode {
-  const { t, locale, card, state, busy, onOpenDialog } = props
+  const { t, locale, card, state, busy, index, onOpenDialog } = props
   const remaining = remainingPercentage(card.limit)
   const resetAt = resetTimeText(locale, card.limit.nextResetTime)
+  const full = isLimitFull(card.limit)
   return (
-    <div className={styles.quotaCard}>
+    <div className={styles.quotaCard} style={staggerAt(index)} data-full={full ? 'true' : undefined}>
       <div className={styles.quotaCardHead}>
         <span className={styles.quotaCardLabel}>{t(card.label)}</span>
         {card.kind === undefined || state === undefined
@@ -129,12 +155,7 @@ function QuotaCardView(props: {
         <span className={styles.quotaCardValue}>{remainingText(locale, card.limit)}</span>
         {resetAt === undefined ? null : <span className={styles.quotaCardReset}>{resetAt}</span>}
       </div>
-      <div className={styles.quotaBar}>
-        <div
-          className={styles.quotaBarFill}
-          style={{ width: `${String(remaining ?? 0)}%`, backgroundColor: card.color }}
-        />
-      </div>
+      <QuotaBar remaining={remaining} color={card.color} />
     </div>
   )
 }
@@ -165,10 +186,15 @@ export function QuotaSection(props: QuotaSectionProps): ReactNode {
   return (
     <section className={styles.section}>
       <div className={styles.sectionHead}>
-        <div className={styles.sectionHeadLeft}>
+        <div className={styles.sectionTitleGroup}>
           <h3 className={styles.sectionTitle}>{t('quotaTitle')}</h3>
           {grantCount === 0 ? null : (
-            <button type="button" className={styles.resetBadge} onClick={() => { setDialogOpen(true) }}>
+            <button
+              type="button"
+              className={styles.resetBadge}
+              aria-label={t('resetOpportunity', { count: grantCount })}
+              onClick={() => { setDialogOpen(true) }}
+            >
               <IconSparkleRegular size={12} />
               <span>{t('resetOpportunity', { count: grantCount })}</span>
               {earliestExpiry === undefined ? null : (
@@ -179,7 +205,7 @@ export function QuotaSection(props: QuotaSectionProps): ReactNode {
             </button>
           )}
         </div>
-        <div className={styles.sectionHeadRight}>
+        <div className={styles.cardAction}>
           <span className={styles.sectionMeta}>
             {quota?.stale === true ? t('quotaStale') : t('quotaUpdatedAt', { time: resetTimeText(locale, quota?.fetchedAt, 'dateTime') })}
           </span>
@@ -187,6 +213,7 @@ export function QuotaSection(props: QuotaSectionProps): ReactNode {
             variant="ghost"
             size="sm"
             aria-label={t('refresh')}
+            title={t('refresh')}
             onClick={() => { onRefresh() }}
           >
             <IconRefreshOutlineRegular size={14} />
@@ -194,7 +221,7 @@ export function QuotaSection(props: QuotaSectionProps): ReactNode {
         </div>
       </div>
       <div className={styles.quotaCards}>
-        {cards.map(card => (
+        {cards.map((card, index) => (
           <QuotaCardView
             key={card.key}
             t={t}
@@ -202,6 +229,7 @@ export function QuotaSection(props: QuotaSectionProps): ReactNode {
             card={card}
             state={card.kind === 'five_hour' ? resets.fiveHour : card.kind === 'week' ? resets.week : undefined}
             busy={resetting}
+            index={index}
             onOpenDialog={() => { setDialogOpen(true) }}
           />
         ))}
@@ -261,12 +289,7 @@ function ResetDialog(props: {
                 <span className={styles.dialogUsageLabel}>{t(card.label)}</span>
                 <span className={styles.dialogUsageValue}>{remainingText(locale, card.limit)}</span>
                 {resetAt === undefined ? null : <span className={styles.dialogUsageMeta}>{resetAt}</span>}
-                <div className={styles.quotaBar}>
-                  <div
-                    className={styles.quotaBarFill}
-                    style={{ width: `${String(remaining ?? 0)}%`, backgroundColor: card.color }}
-                  />
-                </div>
+                <QuotaBar remaining={remaining} color={card.color} />
               </div>
             )
           })}

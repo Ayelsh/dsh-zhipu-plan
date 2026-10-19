@@ -27,17 +27,35 @@ Spending one is the only manual step, and it goes through the dialog. The deploy
 
 ## Install
 
-Build the package (see below), then install the **tarball** into the profile the application owns:
+### Plugin market (one click)
+
+The plugin is listed in the [dsh-market](https://github.com/dsh-market/dsh-market) catalog. Open **Settings → Plugin Market**, search for **Zhipu** (or 智谱), and press **Install** — the market installs the prebuilt release tarball below, so nothing is built locally. A profile without the market installs it first (`dsh plugin --profile <profile> add dshmarket`, then restart the host).
+
+### Prebuilt tarball
+
+Every release carries the same version-free asset name, so this address always resolves to the newest release:
+
+<https://github.com/Ayelsh/dsh-zhipu-plan/releases/latest/download/dsh-zhipu-plan.tgz>
 
 ```sh
-# Desktop: Settings → Plugins accepts the spec below in the install field.
+# Desktop: Settings → Plugins accepts this address in the install field.
 # CLI (for a CLI-owned profile such as `dsh web`):
-dsh plugin --profile web add ./dsh-zhipu-plan-0.2.0.tgz
+dsh plugin --profile <profile> add https://github.com/Ayelsh/dsh-zhipu-plan/releases/latest/download/dsh-zhipu-plan.tgz
 ```
+
+The asset is the packed package: `lib/index.js`, `lib/typert.js`, `lib/client.js`, `cordis.patch.yml`, `package.json`, `README.md`, and the preview page.
+
+### From source
+
+```sh
+dsh plugin --profile <profile> add github:Ayelsh/dsh-zhipu-plan
+```
+
+A source install checks the repository out and runs its `prepare` script (`node scripts/build.mjs`) before packing, so `lib/*.js` is built from `src/` instead of missing from the installed package. The build needs `esbuild` from the package's `devDependencies`; pnpm ≥ 10 blocks dependency build scripts until the profile allows them, so a profile that refuses the script installs a package without artifacts. Use the prebuilt tarball above in that case.
 
 The Host restarts the affected plugin graph; a full application restart is the reliable way to pick up a newly installed bundle. Then open **Settings → 智谱套餐**, choose the deployment and plan kind, and sign in.
 
-**Install from the tarball, not from this directory.** A local folder installed as a dependency becomes a `link:` to wherever it sits, and both Node and the harness resolve a linked package by its real path. The harness routes bare `@deepseek-ai/*` requests to the running installation only for importers under `$DSH_HOME/profiles`, so a linked folder anywhere else — `G:\dsh-build\dist\dsh-zhipu-plan-0.2.0`, a checkout, a desktop — cannot resolve `@deepseek-ai/cordis` and fails to load with `failed to import`. A tarball is unpacked *into* the profile, which is why it works. Copying the folder into `$DSH_HOME/profiles/<profile>/node_modules/` also works, because then it is under the profiles tree, but nothing manages that copy.
+**Install from the tarball, not from this directory.** A local folder installed as a dependency becomes a `link:` to wherever it sits, and both Node and the harness resolve a linked package by its real path. The harness routes bare `@deepseek-ai/*` requests to the running installation only for importers under `$DSH_HOME/profiles`, so a linked folder anywhere else — `G:\dsh-build\dist\dsh-zhipu-plan`, a checkout, a desktop — cannot resolve `@deepseek-ai/cordis` and fails to load with `failed to import`. A tarball is unpacked *into* the profile, which is why it works. Copying the folder into `$DSH_HOME/profiles/<profile>/node_modules/` also works, because then it is under the profiles tree, but nothing manages that copy.
 
 To remove it, uninstall the bundle the same way (`remove dsh-zhipu-plan`), which also drops its patch layer.
 
@@ -46,10 +64,14 @@ To remove it, uninstall the bundle the same way (`remove dsh-zhipu-plan`), which
 ```sh
 pnpm install
 pnpm run build      # writes lib/index.js, lib/typert.js, lib/client.js
+pnpm run verify     # build, then the artifact, dictionary, and Remote checks
+pnpm run preview    # writes preview/plan-page.html and preview/plan-page-dark.html
 pnpm pack           # writes dsh-zhipu-plan-<version>.tgz
 ```
 
-The build runs esbuild directly rather than the repository's client preset, because this package is built outside that repository; it then checks the artifacts it produced: the browser bundle only `require`s specifiers the shell's module table answers, every class name the markup uses exists in the injected stylesheet, both dictionaries carry the same keys, and every Remote method the published wire and the service source name exist on both sides.
+`prepare` runs the build, so installing this repository as a dependency produces the same artifacts. The release asset is that tarball renamed to the version-free `dsh-zhipu-plan.tgz`, which is what keeps the `releases/latest/download/dsh-zhipu-plan.tgz` address stable across versions.
+
+The build runs esbuild directly rather than the repository's client preset, because this package is built outside that repository; it then checks the artifacts it produced: the browser bundle only `require`s specifiers the shell's module table answers, every class name the markup uses exists in the injected stylesheet, both dictionaries carry the same keys, and every Remote method the published wire and the service source name exist on both sides. `pnpm run verify` adds the regression gates: `logic-freeze` pins the dictionary, logic identifiers, poll timings, and host reset request a presentation-only change must not move, `client-smoke` materializes the browser bundle against the shell's module table, and the harness loader must accept the published Typert manifest.
 
 ## Layout
 
@@ -81,7 +103,7 @@ The browser half resolves `react`, `react/jsx-runtime`, and `@deepseek-ai/dsh-cl
 
 MIT — see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
 
-- The host modules under src/host/ and the generated wire modules under src/wire/ are derived from the in-tree \@deepseek-ai/dsh-zhipu-plan\ package of DeepSeek Harness (MIT, Copyright (c) 2026 DeepSeek); \eset.ts\ and \service.ts\ were carried over and then extended.
+- The host modules under src/host/ and the generated wire modules under src/wire/ are derived from the in-tree \@deepseek-ai/dsh-zhipu-plan\ package of DeepSeek Harness (MIT, Copyright (c) 2026 DeepSeek); `reset.ts` and `service.ts` were carried over and then extended.
 - Sign-in and quota polling talk to the ZCode authorization relay, an undocumented third-party contract observed from ZCode (Apache-2.0, Copyright 2026 Z.AI Co., Ltd) and rebuilt here; no ZCode source is copied into this project.
 
 This plugin is **not** authored by, affiliated with, or endorsed by Z.AI / Zhipu or DeepSeek. The relay mints tokens under ZCode's own client identity, so using this plugin may conflict with the Z.ai terms of service and Z.ai may revoke access at any time. Every relay origin is a configuration field so the dependency can be repointed or removed. "Z.ai", "Zhipu", "BigModel", "GLM" and "ZCode" are trademarks of their respective owners, used here only descriptively.

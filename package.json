@@ -1,6 +1,6 @@
 {
   "name": "dsh-zhipu-plan",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "description": "Zhipu coding-plan sign-in and quota/usage page for DeepSeek Harness, installed as an out-of-tree profile bundle",
@@ -16,13 +16,16 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "preview"
+    "preview/plan-page.html",
+    "preview/plan-page-dark.html"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "verify": "node scripts/build.mjs && node scripts/verify.mjs && node scripts/client-smoke.mjs",
+    "verify": "node scripts/build.mjs && node scripts/verify.mjs && node scripts/logic-freeze.mjs && node scripts/client-smoke.mjs",
     "client-smoke": "node scripts/client-smoke.mjs",
-    "preview": "node scripts/preview.mjs"
+    "logic-freeze": "node scripts/logic-freeze.mjs",
+    "preview": "node scripts/preview.mjs",
+    "prepare": "node scripts/build.mjs"
   },
   "dsh": {
     "bundle": {

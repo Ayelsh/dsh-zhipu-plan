@@ -96,8 +96,74 @@ async function callMonitor(input: MonitorReadInput, path: string): Promise<Recor
   return isRecord(envelope.data) ? envelope.data : {}
 }
 
-/** Days a range covers; `all` asks the monitor for its longest window. */
-const RANGE_DAYS: Record<PlanUsageRange, number> = { '7d': 7, '30d': 30, all: 180 }
+/** Days a range covers; `all` asks for the longest span the monitor answers. */
+const RANGE_DAYS: Record<PlanUsageRange, number> = { '7d': 7, '30d': 30, all: 366 }
+
+/** Days one calendar year spans in whole days, the monitor's own ceiling for `activity`. */
+const CALENDAR_DAYS = 366
+
+/**
+ * Longest span each endpoint family answers in one request.
+ *
+ * The monitor refuses a longer window outright instead of truncating it, so a
+ * year-long range has to be read in windows of at most these spans. `activity`
+ * is the generous one: it answers a whole year in a single call.
+ */
+export const ACTIVITY_CHUNK_DAYS = 366
+export const USAGE_CHUNK_DAYS = 32
+export const CREDIT_CHUNK_DAYS = 31
+
+/**
+ * The windows one range is read in, newest first.
+ *
+ * The monitor caps a window at 31-32 days for the usage, credit, and
+ * performance families — it refuses a longer one outright rather than
+ * truncating it — while the activity summary answers a whole year in one call.
+ * A year-long range is therefore read family by family: the activity summary as
+ * one window, and the other families as consecutive windows the caller merges.
+ * The chunks abut rather than overlap, so their figures add without double
+ * counting.
+ *
+ * @param range - the surface's chosen window.
+ * @param timeZone - zone the day keys are expressed in.
+ * @param now - current epoch milliseconds.
+ * @param days - longest span each returned window may cover.
+ * @returns the windows, newest first, covering the whole range.
+ */
+export function usageWindows(range: PlanUsageRange, timeZone: string, now: number, days: number): readonly string[] {
+  // The activity family is the one that answers a whole year, so no range asks
+  // for longer than that; a shorter range is one window.
+  const span = Math.min(RANGE_DAYS[range], CALENDAR_DAYS)
+  const end = dayKey(now, timeZone)
+  const windows: string[] = []
+  for (let covered = 0; covered < span; covered += days) {
+    const length = Math.min(days, span - covered)
+    // Walk backwards from today, so the newest window is the one aligned to it.
+    const endTime = now - covered * 86_400_000
+    const startTime = now - (covered + length - 1) * 86_400_000
+    windows.push(
+      `startTime=${encodeURIComponent(`${dayKey(startTime, timeZone)} 00:00:00`)}`
+      + `&endTime=${encodeURIComponent(`${dayKey(endTime, timeZone)} 23:59:59`)}`,
+    )
+  }
+  // The newest window ends today whatever the walk computed for it.
+  const newest = windows[0]
+  if (newest !== undefined) {
+    windows[0] = newest.replace(/endTime=[^&]*$/, `endTime=${encodeURIComponent(`${end} 23:59:59`)}`)
+  }
+  return windows
+}
+
+/**
+ * The window a family that answers a whole range in one request is read with.
+ * @param range - the surface's chosen window.
+ * @param timeZone - zone the day keys are expressed in.
+ * @param now - current epoch milliseconds.
+ * @returns that family's single window.
+ */
+export function usageWindow(range: PlanUsageRange, timeZone: string, now: number): string {
+  return usageWindows(range, timeZone, now, CALENDAR_DAYS)[0] ?? ''
+}
 
 /** One day-key in the caller's zone, as the monitor's window parameters are spelled. */
 function dayKey(time: number, timeZone: string): string {
@@ -106,16 +172,89 @@ function dayKey(time: number, timeZone: string): string {
 }
 
 /**
- * The monitor window one range asks for.
- * @param range - the surface's chosen window.
- * @param timeZone - zone the day keys are expressed in.
- * @param now - current epoch milliseconds.
- * @returns the `startTime`/`endTime` parameters in `YYYY-MM-DD HH:mm:ss`.
+ * Fold per-model totals read over several windows into one window's totals.
+ * @param parts - the windows' readings, in any order.
+ * @returns tokens and calls added up, and every model that appears in any part.
  */
-export function usageWindow(range: PlanUsageRange, timeZone: string, now: number): string {
-  const end = `${dayKey(now, timeZone)} 23:59:59`
-  const startTime = now - (RANGE_DAYS[range] - 1) * 86_400_000
-  return `startTime=${encodeURIComponent(`${dayKey(startTime, timeZone)} 00:00:00`)}&endTime=${encodeURIComponent(end)}`
+export function mergeModelUsage(parts: readonly PlanModelUsage[]): PlanModelUsage {
+  const models = new Map<string, number>()
+  const days = new Set<string>()
+  let calls = 0
+  let tokens = 0
+  for (const part of parts) {
+    calls += part.calls
+    tokens += part.tokens
+    for (const day of part.days) days.add(day)
+    for (const model of part.models) models.set(model.model, (models.get(model.model) ?? 0) + model.tokens)
+  }
+  return {
+    days: [...days].sort(),
+    calls,
+    tokens,
+    models: [...models]
+      .map(([model, total]) => ({ model, tokens: total }))
+      .sort((left, right) => right.tokens - left.tokens),
+  }
+}
+
+/**
+ * Fold per-tool totals read over several windows into one window's totals.
+ * @param parts - the windows' readings, in any order.
+ * @returns call counts added up, and every tool that appears in any part.
+ */
+export function mergeToolUsage(parts: readonly PlanToolUsage[]): PlanToolUsage {
+  const tools = new Map<string, number>()
+  let searches = 0
+  let webReads = 0
+  let zreads = 0
+  for (const part of parts) {
+    searches += part.searches
+    webReads += part.webReads
+    zreads += part.zreads
+    for (const tool of part.tools) tools.set(tool.tool, (tools.get(tool.tool) ?? 0) + tool.calls)
+  }
+  return {
+    searches,
+    webReads,
+    zreads,
+    tools: [...tools]
+      .map(([tool, calls]) => ({ tool, calls }))
+      .sort((left, right) => right.calls - left.calls),
+  }
+}
+
+/**
+ * Fold day-keyed decode-speed series read over several windows into one series.
+ * @param parts - the windows' readings, in any order.
+ * @returns one day-keyed series, oldest first; a day two windows both report keeps the newer reading.
+ */
+export function mergeDecodeSpeed(
+  parts: readonly PlanDecodeSpeed[],
+): PlanDecodeSpeed {
+  const byDay = new Map<string, { readonly proMax: number; readonly lite: number }>()
+  for (const part of parts) {
+    // Newest first, so an earlier part's day overwrites the older reading.
+    for (const [index, day] of part.days.entries()) {
+      if (byDay.has(day)) continue
+      byDay.set(day, { proMax: part.proMax[index] ?? 0, lite: part.lite[index] ?? 0 })
+    }
+  }
+  const days = [...byDay.keys()].sort()
+  return {
+    days,
+    proMax: days.map(day => byDay.get(day)?.proMax ?? 0),
+    lite: days.map(day => byDay.get(day)?.lite ?? 0),
+  }
+}
+
+/** An activity summary with nothing in it, for a range the monitor answered no day for. */
+export const EMPTY_ACTIVITY: PlanActivitySummary = {
+  days: [],
+  totalTokens: 0,
+  peakDayTokens: 0,
+  totalUsageMs: 0,
+  currentStreakDays: 0,
+  longestStreakDays: 0,
 }
 
 /**
@@ -133,58 +272,59 @@ function withScopeType(input: MonitorReadInput, teamType: string, window: string
  * Read the window's per-model usage.
  * @param input - monitor addressing and authorization.
  * @param window - the `startTime`/`endTime` query string.
+ * @param read - the request whose authorization these calls ride; `input` when absent.
  * @returns per-model totals, the day keys they span, and the overall call count.
  */
-export async function fetchModelUsage(input: MonitorReadInput, window: string): Promise<PlanModelUsage> {
-  const data = await callMonitor(input, `/api/monitor/usage/model-usage?${withScopeType(input, '2', window)}`)
+export async function fetchModelUsage(input: MonitorReadInput, window: string, read?: MonitorReadInput): Promise<PlanModelUsage> {
+  const data = await callMonitor(read ?? input, `/api/monitor/usage/model-usage?${withScopeType(input, '2', window)}`)
   const totals = isRecord(data['totalUsage']) ? data['totalUsage'] : {}
   const summaryList = Array.isArray(totals['modelSummaryList'])
     ? totals['modelSummaryList']
     : Array.isArray(data['modelSummaryList']) ? data['modelSummaryList'] : []
-  const models: PlanModelShare[] = summaryList
-    .flatMap((entry) => {
-      if (!isRecord(entry)) return []
-      const name = readString(entry['modelName'])
-      if (name === undefined) return []
-      return [{ model: name, tokens: readNumber(entry['totalTokens']) ?? 0 }]
-    })
+  const models = new Map<string, number>()
+  for (const entry of summaryList) {
+    if (!isRecord(entry)) continue
+    const name = readString(entry['modelName'])
+    if (name === undefined) continue
+    models.set(name, (models.get(name) ?? 0) + (readNumber(entry['totalTokens']) ?? 0))
+  }
   return {
     days: (Array.isArray(data['x_time']) ? data['x_time'] : []).flatMap(entry => readString(entry) ?? []),
     calls: readNumber(totals['totalModelCallCount']) ?? 0,
     tokens: readNumber(totals['totalTokensUsage']) ?? 0,
-    models,
+    models: [...models].map(([model, tokens]) => ({ model, tokens })),
   }
 }
-
 /**
  * Read the window's per-tool usage.
  * @param input - monitor addressing and authorization.
  * @param window - the `startTime`/`endTime` query string.
+ * @param read - the request whose origin and timeout these calls borrow; `input` when absent.
  * @returns per-tool call totals plus the search and read counts the monitor leads with.
  */
-export async function fetchToolUsage(input: MonitorReadInput, window: string): Promise<PlanToolUsage> {
-  const data = await callMonitor(input, `/api/monitor/usage/tool-usage?${withScopeType(input, '2', window)}`)
+export async function fetchToolUsage(input: MonitorReadInput, window: string, read?: MonitorReadInput): Promise<PlanToolUsage> {
+  const data = await callMonitor(read ?? input, `/api/monitor/usage/tool-usage?${withScopeType(input, '2', window)}`)
   const totals = isRecord(data['totalUsage']) ? data['totalUsage'] : {}
   const summaryList = Array.isArray(totals['toolSummaryList'])
     ? totals['toolSummaryList']
     : Array.isArray(data['toolSummaryList']) ? data['toolSummaryList'] : []
-  const tools = summaryList
-    .flatMap((entry) => {
-      if (!isRecord(entry)) return []
-      const name = readString(entry['toolName']) ?? readString(entry['toolCode'])
-      if (name === undefined) return []
-      return [{ tool: name, calls: readNumber(entry['totalUsageCount']) ?? 0 }]
-    })
+  const tools = new Map<string, number>()
+  for (const entry of summaryList) {
+    if (!isRecord(entry)) continue
+    const name = readString(entry['toolName']) ?? readString(entry['toolCode'])
+    if (name === undefined) continue
+    tools.set(name, (tools.get(name) ?? 0) + (readNumber(entry['totalUsageCount']) ?? 0))
+  }
   return {
     searches: readNumber(totals['totalNetworkSearchCount']) ?? 0,
     webReads: readNumber(totals['totalWebReadMcpCount']) ?? 0,
     zreads: readNumber(totals['totalZreadMcpCount']) ?? 0,
-    tools,
+    tools: [...tools].map(([tool, calls]) => ({ tool, calls })),
   }
 }
 
 /**
- * Read the window's activity summary and daily series.
+ * Read the window's daily activity series and its summary.
  * @param input - monitor addressing and authorization.
  * @param window - the `startTime`/`endTime` query string.
  * @returns the day series plus the totals, streaks, and peak day the monitor reports.
@@ -247,12 +387,12 @@ export async function fetchCreditSummary(input: MonitorReadInput, window: string
  * @param window - the `startTime`/`endTime` query string.
  * @returns the days and the per-tier token-per-second series the monitor reports.
  */
-export async function fetchDecodeSpeed(input: MonitorReadInput, window: string): Promise<{
+export async function fetchDecodeSpeed(input: MonitorReadInput, window: string, read?: MonitorReadInput): Promise<{
   readonly days: readonly string[]
   readonly proMax: readonly number[]
   readonly lite: readonly number[]
 }> {
-  const data = await callMonitor(input, `/api/monitor/usage/model-performance-day?${window}`)
+  const data = await callMonitor(read ?? input, `/api/monitor/usage/model-performance-day?${window}`)
   return {
     days: (Array.isArray(data['x_time']) ? data['x_time'] : []).flatMap(entry => readString(entry) ?? []),
     proMax: readSeries(data['proMaxDecodeSpeed']),

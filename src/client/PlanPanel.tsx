@@ -12,11 +12,15 @@
  * is on hand the eligibility request is repeated on the deployment's terms —
  * never as a button the user is asked to press.
  *
+ * Everything this file renders is a view of state it already holds: the markup
+ * is grouped around the sheet's surfaces — the account's raised block, the
+ * quota section, the usage tables — and no read, poll, or decision lives in it.
+ *
  * @module dsh-zhipu-plan/client/PlanPanel
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Button, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PlanLocaleKey } from './locales.ts'
 import type {
   PlanAccount, PlanLoginState, PlanQuota, PlanResetKind, PlanResetStatus, PlanUsageRange, PlanUsageReport,
@@ -24,12 +28,13 @@ import type {
 import { randomKey } from './keys.ts'
 import { QuotaSection } from './QuotaSection.tsx'
 import { PlanUsagePanel } from './PlanUsagePanel.tsx'
+import { SignInCard } from './SignInCard.tsx'
 import {
   EMPTY_RESET_STATE, RESET_OPPORTUNITY_DEFAULT_COOLDOWN_MS, RESET_OPPORTUNITY_MIN_RETRY_MS,
   RESET_STATUS_POLL_MS, failManualReset, foldResetStatus, startManualReset, type ResetState,
 } from './reset.ts'
 import { resetTimeText } from './quota.ts'
-import { styles } from './styles.ts'
+import { shareScale, staggerAt, styles } from './styles.ts'
 
 /** This page's copy seat. */
 type Translate = (key: PlanLocaleKey, params?: Record<string, unknown>) => string
@@ -72,55 +77,16 @@ const POLL_INTERVAL_MS = 1_000
 /** How long the completion notice stays after the deployment confirms a reset. */
 const COMPLETION_NOTICE_MS = 8_000
 
-/** Which deployment the account authorizes against, chosen before signing in. */
-function Picker(props: {
-  readonly t: Translate
-  readonly label: PlanLocaleKey
-  readonly value: string
-  readonly options: readonly { readonly value: string; readonly label: PlanLocaleKey }[]
-  readonly onChange: (value: string) => void
-}): ReactNode {
-  const { t, label, value, options, onChange } = props
-  return (
-    <label className={styles.pickerRow}>
-      <span>{t(label)}</span>
-      <select
-        className={styles.picker}
-        value={value}
-        onChange={(event) => { onChange(event.currentTarget.value) }}
-      >
-        {options.map(option => <option key={option.value} value={option.value}>{t(option.label)}</option>)}
-      </select>
-    </label>
-  )
-}
+/** How many skeleton rows a surface that has not answered yet stands in with. */
+const SKELETON_ROWS = 3
 
-/** The authorize address and its copyable fallback, shown while waiting. */
-function WaitingNotice(props: {
-  readonly t: Translate
-  readonly authorizeUrl?: string
-  readonly onCancel: () => void
-}): ReactNode {
-  const { t, authorizeUrl, onCancel } = props
-  const [copied, setCopied] = useState(false)
+/** One labelled account fact, as the sheet's `heroRow` lays it out. */
+function FactRow(props: { readonly label: string; readonly value: ReactNode; readonly stale?: boolean }): ReactNode {
+  const { label, value, stale = false } = props
   return (
-    <div className={styles.authorize} role="status">
-      <p className={styles.status}>{authorizeUrl === undefined ? t('planWaiting') : t('planAuthorizeHint')}</p>
-      {authorizeUrl === undefined ? null : (
-        <>
-          <a className={styles.authorizeLink} href={authorizeUrl} target="_blank" rel="noreferrer">{authorizeUrl}</a>
-          <div className={styles.sectionHeadRight}>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => { void writeClipboard(authorizeUrl).then(() => { setCopied(true) }) }}
-            >
-              {copied ? t('planCopied') : t('planCopy')}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onCancel}>{t('planCancel')}</Button>
-          </div>
-        </>
-      )}
+    <div className={styles.heroRow}>
+      <dt className={styles.heroLabel}>{label}</dt>
+      <dd className={`${styles.heroValue}${stale ? ` ${styles.heroValueStale}` : ''}`}>{value}</dd>
     </div>
   )
 }
@@ -269,7 +235,33 @@ export function PlanPanel(props: PlanPanelProps): ReactNode {
     ).finally(() => { setResetting(false) })
   }
 
-  if (!loaded) return <p className={styles.status}>{t('planPending')}</p>
+  // The account is not known yet: stand in the surfaces that are about to
+  // arrive, at their real shape, rather than showing a line of text where a
+  // card will be — the wait reads as the page assembling, not as an empty page.
+  if (!loaded) {
+    return (
+      <div className={styles.page}>
+        <p className={styles.status} role="status">{t('planPending')}</p>
+        <div className={styles.hero} aria-hidden="true">
+          {Array.from({ length: 2 }, (_, index) => (
+            <div key={index} className={styles.skeletonRow}>
+              <span className={styles.skeleton} data-wide="true" />
+              <span className={styles.skeleton} />
+            </div>
+          ))}
+        </div>
+        <div className={styles.quotaCards} aria-hidden="true">
+          {Array.from({ length: SKELETON_ROWS }, (_, index) => (
+            <div key={index} className={styles.quotaCard} style={staggerAt(index)}>
+              <span className={styles.skeleton} data-wide="true" />
+              <span className={styles.skeleton} data-figure="true" />
+              <span className={styles.skeleton} />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   const locale = currentLocale()
   const errorText = resets.fiveHour.error ?? resets.week.error
@@ -277,48 +269,19 @@ export function PlanPanel(props: PlanPanelProps): ReactNode {
   if (account === undefined || loginState.state === 'waiting' || loginState.state === 'failed') {
     return (
       <div className={styles.page}>
-        <div className={styles.signInCard}>
-          {loginState.state === 'failed' ? <p className={styles.error}>{loginState.message}</p> : null}
-          {loginState.state === 'waiting'
-            ? (
-              <WaitingNotice
-                t={t}
-                {...loginState.authorizeUrl === undefined ? {} : { authorizeUrl: loginState.authorizeUrl }}
-                onCancel={() => { void cancelLogin() }}
-              />
-            )
-            : (
-              <>
-                <div className={styles.pickers}>
-                  <Picker
-                    t={t}
-                    label="planDeployment"
-                    value={deployment}
-                    options={[
-                      { value: 'zai', label: 'planDeploymentZai' },
-                      { value: 'bigmodel', label: 'planDeploymentBigmodel' },
-                    ]}
-                    onChange={(value) => { setDeployment(value as 'bigmodel' | 'zai') }}
-                  />
-                  <Picker
-                    t={t}
-                    label="planKind"
-                    value={planKind}
-                    options={[
-                      { value: 'individual-coding-plan', label: 'planKindIndividual' },
-                      { value: 'team-coding-plan', label: 'planKindTeam' },
-                      { value: 'start-plan', label: 'planKindStart' },
-                    ]}
-                    onChange={(value) => { setPlanKind(value as PlanAccount['planKind']) }}
-                  />
-                </div>
-                <p className={styles.note}>{t('planSignInHint')}</p>
-                <div>
-                  <Button variant="primary" size="md" onClick={signIn}>{t('planSignIn')}</Button>
-                </div>
-              </>
-            )}
-        </div>
+        {loginState.state === 'failed' ? <p className={styles.error} role="status">{loginState.message}</p> : null}
+        {/* A failed attempt leaves the choices on screen, so signing in again is
+            one press rather than a reload. */}
+        <SignInCard
+          t={t}
+          loginState={loginState.state === 'failed' ? { state: 'idle' } : loginState}
+          deployment={deployment}
+          planKind={planKind}
+          onDeployment={setDeployment}
+          onPlanKind={setPlanKind}
+          onSignIn={signIn}
+          onCancel={() => { void cancelLogin() }}
+        />
       </div>
     )
   }
@@ -329,34 +292,48 @@ export function PlanPanel(props: PlanPanelProps): ReactNode {
 
   return (
     <div className={styles.page}>
-      <dl className={styles.facts}>
-        <div className={styles.factRow}>
-          <dt className={styles.factLabel}>{t('planAccount')}</dt>
-          <dd className={styles.factValue}>{account.accountLabel}</dd>
-        </div>
-        <div className={styles.factRow}>
-          <dt className={styles.factLabel}>{t('planDeployment')}</dt>
-          <dd className={styles.factValue}>
-            {t(account.deployment === 'zai' ? 'planDeploymentZai' : 'planDeploymentBigmodel')}
-          </dd>
-        </div>
-        <div className={styles.factRow}>
-          <dt className={styles.factLabel}>{t('planKind')}</dt>
-          <dd className={styles.factValue}>{t(planKindKey(account.planKind))}</dd>
-        </div>
-        {account.jwtExpiresAt === undefined ? null : (
-          <div className={styles.factRow}>
-            <dt className={styles.factLabel}>{t('planTokenExpiry')}</dt>
-            <dd className={styles.factValue}>
-              {account.jwtExpired ? t('planTokenExpired') : resetTimeText(locale, account.jwtExpiresAt, 'dateTime')}
-            </dd>
+      <section className={styles.hero}>
+        <dl className={styles.heroFacts}>
+          <FactRow label={t('planAccount')} value={account.accountLabel} />
+          <FactRow
+            label={t('planDeployment')}
+            value={t(account.deployment === 'zai' ? 'planDeploymentZai' : 'planDeploymentBigmodel')}
+          />
+          <FactRow label={t('planKind')} value={t(planKindKey(account.planKind))} />
+          {account.jwtExpiresAt === undefined ? null : (
+            <FactRow
+              label={t('planTokenExpiry')}
+              stale={account.jwtExpired}
+              value={account.jwtExpired
+                ? t('planTokenExpired')
+                : resetTimeText(locale, account.jwtExpiresAt, 'dateTime')}
+            />
+          )}
+        </dl>
+        {/* The stamp and the one account action share a row, so the foot of the
+            card reads as one line rather than as two stacked blocks. */}
+        <div className={styles.heroFooter}>
+          <div className={styles.heroMeta}>
+            <span className={styles.heroMetaItem}>{t('localNote')}</span>
           </div>
-        )}
-      </dl>
-
-      {quota === undefined && resets.fiveHour.status === 'idle' && resets.week.status === 'idle'
-        ? <p className={styles.status}>{t('planPending')}</p>
-        : null}
+          <div className={styles.heroActions}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void logout().then(() => {
+                  setAccount(undefined)
+                  setLoginState({ state: 'idle' })
+                  setQuota(undefined)
+                  setResets(EMPTY_RESET_STATE)
+                })
+              }}
+            >
+              {t('planSignOut')}
+            </Button>
+          </div>
+        </div>
+      </section>
 
       <QuotaSection
         t={t}
@@ -370,31 +347,13 @@ export function PlanPanel(props: PlanPanelProps): ReactNode {
       />
 
       {completedNotice === undefined ? null : (
-        <p className={styles.sectionMeta} role="status">
+        <p className={styles.notice} role="status">
           {t(completedNotice === 'five_hour' ? 'resetDoneFiveHour' : 'resetDoneWeek')}
         </p>
       )}
       {errorText === undefined ? null : <p className={styles.error} role="status">{errorText}</p>}
 
       <PlanUsagePanel t={t} loadUsage={loadUsage} />
-
-      <div className={styles.sectionHeadRight}>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            void logout().then(() => {
-              setAccount(undefined)
-              setLoginState({ state: 'idle' })
-              setQuota(undefined)
-              setResets(EMPTY_RESET_STATE)
-            })
-          }}
-        >
-          {t('planSignOut')}
-        </Button>
-      </div>
-      <p className={styles.note}>{t('localNote')}</p>
     </div>
   )
 }

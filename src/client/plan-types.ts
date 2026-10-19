@@ -154,3 +154,20 @@ export interface PlanResetStatus {
 export type PlanResetClaim =
   | { readonly granted: true }
   | { readonly granted: false; readonly nextTryAt: number }
+
+/** The host's four runtime capability switches, as the settings namespace resolves them. */
+export interface PlanBackendSettings {
+  readonly search: boolean
+  readonly reader: boolean
+  readonly zread: boolean
+  readonly zhPrompt: boolean
+}
+
+/** One switch the card can write. */
+export type PlanBackendSettingKey = keyof PlanBackendSettings
+
+/** One resolved snapshot: the switches plus whether the profile accepts writes. */
+export interface PlanBackendSettingsSnapshot {
+  readonly settings: PlanBackendSettings
+  readonly writable: boolean
+}

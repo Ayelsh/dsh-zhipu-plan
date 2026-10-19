@@ -213,3 +213,159 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'zhipu-plan/network': { readonly reason: string }
   }
 }
+
+/** Volatile switches the MCP-backed surfaces read at call time. */
+export interface ZhipuBackendSettings {
+  /** Built-in web search is routed to the Zhipu search provider. */
+  readonly search: boolean
+  /** Built-in web fetch is routed to the Zhipu reader provider. */
+  readonly reader: boolean
+  /** The three github_* zread tools are mounted. */
+  readonly zread: boolean
+  /** Model-facing hint language: Chinese when true, English otherwise. */
+  readonly zhPrompt: boolean
+}
+
+/** One externally sourced search result. */
+export interface ZhipuSearchSource {
+  /** The result link, always a safe http(s) URL by the time it leaves the surface. */
+  readonly url: string
+  readonly title?: string
+  readonly snippet?: string
+  readonly publishedAt?: string
+}
+
+/** The search outcome the built-in web service consumes. */
+export interface ZhipuSearchOutcome {
+  readonly results: readonly ZhipuSearchSource[]
+  /** Always false: an over-long result set is pre-truncated, not reported as truncation. */
+  readonly truncated: boolean
+}
+
+/** The web-fetch outcome the built-in web service consumes. */
+export interface ZhipuReadOutcome {
+  readonly url: string
+  readonly statusCode: 200
+  readonly body: { readonly kind: 'text'; readonly content: string }
+  readonly truncated: boolean
+  readonly title?: string
+}
+
+/* The host packages are externalized at build time, so the tool and provider
+ * contracts they accept are declared structurally here rather than imported. */
+
+/** One rendered block of a tool result. */
+export interface ToolRenderBlock {
+  readonly type: 'text'
+  readonly text: string
+}
+
+/** Structural contract of one tool the host's tools service accepts. */
+export interface ToolDefinitionShape {
+  readonly name: string
+  readonly description: string
+  readonly parameters: Record<string, unknown>
+  readonly output: {
+    readonly schema: Record<string, unknown>
+    readonly render: (args: unknown, result: unknown) => readonly ToolRenderBlock[]
+    readonly presentationMeta?: (args: unknown, value: unknown) => unknown
+  }
+  readonly timeoutMs?: number
+  readonly isConcurrencySafe?: boolean | (() => boolean)
+  readonly presentCall?: (args: unknown) => unknown
+  readonly presentResult?: (args: unknown, result: unknown) => unknown
+  readonly execute: (args: unknown, context: { readonly signal?: AbortSignal }) => Promise<unknown>
+}
+
+/** Structural contract of one search provider the host's web service accepts. */
+export interface WebSearchProviderShape {
+  readonly id: string
+  readonly label?: string
+  available(): boolean
+  search(request: { readonly query: string; readonly maxResults?: number }, signal?: AbortSignal): Promise<ZhipuSearchOutcome>
+}
+
+/** Structural contract of one fetch provider the host's web service accepts. */
+export interface WebFetchProviderShape {
+  readonly id: string
+  readonly label?: string
+  available(): boolean
+  fetch(request: { readonly url: string }, signal?: AbortSignal): Promise<ZhipuReadOutcome>
+}
+
+/** Structural contract of one system-prompt section the host accepts. */
+export interface SystemPromptSectionShape {
+  readonly name: string
+  readonly order?: number
+  readonly text: string | (() => string)
+}
+
+/** The session identity an agent exposes for preset-scoped re-evaluation. */
+export interface AgentSessionShape {
+  readonly id?: unknown
+  readonly header?: { readonly id?: unknown }
+}
+
+/** Structural contract of one live agent the host registry exposes. */
+export interface AgentShape {
+  readonly id?: unknown
+  readonly session?: AgentSessionShape
+  readonly ctx: AgentContextShape
+}
+
+/** Structural contract of the agent-scoped context services resolve through. */
+export interface AgentContextShape {
+  get(name: string): unknown
+}
+
+/** Structural contract of the host agent registry seam. */
+export interface AgentsServiceShape {
+  list(): readonly AgentShape[]
+}
+
+/** Structural contract of the host agent-preset registry probe. */
+export interface AgentPresetsShape {
+  composedPreset(ctx: AgentContextShape): string | undefined
+}
+
+/** Structural contract of one agent-scoped tool restriction. */
+export interface ToolRestrictionShape {
+  readonly allow?: readonly string[]
+  readonly deny?: readonly string[]
+}
+
+/** Structural contract of the host tools service seams this plugin uses. */
+export interface ToolsServiceShape {
+  register(definition: ToolDefinitionShape): () => void
+  get(name: string, scope?: object): ToolDefinitionShape | undefined
+  restrict(filter: ToolRestrictionShape): () => void
+}
+
+/** Structural contract of the host system-prompt service seams this plugin uses. */
+export interface SystemPromptServiceShape {
+  section(section: SystemPromptSectionShape): () => void
+}
+
+/** Structural contract of the host web service seams this plugin uses. */
+export interface WebServiceShape {
+  registerSearchProvider(provider: WebSearchProviderShape): () => void
+  registerFetchProvider(provider: WebFetchProviderShape): () => void
+}
+
+/** One active profile row the host config editor can address. */
+export interface ConfigEditorEntryShape {
+  readonly options: {
+    readonly id: string
+    readonly name?: string
+    readonly config?: unknown
+  }
+}
+
+/** Structural contract of the host config editor that persists profile rows. */
+export interface ConfigEditorShape {
+  entries(): readonly ConfigEditorEntryShape[]
+  edit(
+    entry: ConfigEditorEntryShape,
+    change: (current: Record<string, unknown>, inherited: Record<string, unknown>) => Record<string, unknown>,
+  ): Promise<void>
+}

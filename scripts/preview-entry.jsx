@@ -9,7 +9,9 @@
  */
 
 import { createRoot } from 'react-dom/client'
+import { BackendSettings } from '../src/client/BackendSettings.tsx'
 import { PlanPanel } from '../src/client/PlanPanel.tsx'
+import { SettingsTabs } from '../src/client/SettingsTabs.tsx'
 import { STYLE_SHEET } from '../src/client/styles.ts'
 
 export { STYLE_SHEET }
@@ -166,6 +168,18 @@ function usageRead(options) {
   return async () => usage
 }
 
+/** The page's two views, as the shell presents them. */
+const TABS = [
+  { id: 'web', label: 'tabWeb' },
+  { id: 'account', label: 'tabAccount' },
+]
+
+/** The switches the preview card shows: the three web-side ones on, the prompt language off. */
+const backendSnapshot = {
+  writable: true,
+  settings: { search: true, reader: true, zread: true, zhPrompt: false },
+}
+
 /** The copy seat, resolving keys to the dictionary text for the chosen language. */
 function translate(dictionary) {
   return (key, params) => {
@@ -199,5 +213,19 @@ export function mount(element, options) {
     currentLocale: () => options.localeId,
   }
   if (options.account === false) props.loadAccount = async () => undefined
-  createRoot(element).render(<PlanPanel {...props} />)
+  // The page is two views; the plan read lives in the second one, so every
+  // plan scenario selects it after the shell mounts.
+  createRoot(element).render(
+    <SettingsTabs
+      t={t}
+      tabs={TABS}
+      render={(id) => (id === 'web'
+        ? <BackendSettings t={t} load={async () => backendSnapshot} save={async () => backendSnapshot} />
+        : <PlanPanel {...props} />)}
+    />,
+  )
+  if (options.tab === 'web') return
+  setTimeout(() => {
+    element.querySelectorAll('[role="tab"]')[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  }, 0)
 }

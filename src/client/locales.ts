@@ -13,6 +13,8 @@
 /** Simplified Chinese dictionary and key source of truth. */
 export const zh = {
   nav: '智谱套餐',
+  tabWeb: '联网能力',
+  tabAccount: '套餐账户',
   planPending: '正在读取套餐状态…',
   planAccount: '账号',
   planDeployment: '授权部署',
@@ -78,6 +80,7 @@ export const zh = {
   usageShare: '占比',
   usageCalls: '调用次数',
   usageTools: '按工具',
+  usageActivity: '活跃度',
   toolName: '工具',
   toolCalls: '调用',
   usageActiveDays: '活跃天数',
@@ -93,11 +96,27 @@ export const zh = {
   subscriptionCycle: '计费周期：{cycle}',
   subscriptionAutoRenew: '自动续费',
   localNote: '额度与用量均来自智谱服务端。',
+  backendHint: '在内置联网工具之外附加的智谱工具；复用本插件登录的套餐凭据，无需单独配置 Key。',
+  backendSearch: '智谱联网搜索',
+  backendSearchHint: '附加工具 zhipu_web_search：单次接受 1–4 条查询，结果合并去重，最多 40 个来源。',
+  backendReader: '智谱网页读取',
+  backendReaderHint: '附加工具 zhipu_web_fetch：以 Markdown 返回页面，上游 20 秒超时，正文上限 20 万字符。',
+  backendZread: 'GitHub 仓库工具',
+  backendZreadHint: '附加工具 github_search_doc、github_get_repo_structure、github_read_file。',
+  backendPromptLanguage: '智谱工具提示语言',
+  backendPromptLanguageHint: '开启后工具说明与提示段落使用英文，关闭时使用中文。',
+  backendFootnote: '内置 web_search / web_fetch 保持不变；开关即时生效，以上均为智谱附加能力。',
+  backendReadOnly: '当前配置为只读，开关暂不可修改。',
+  backendNotReady: '尚未登录智谱套餐，工具暂不可用',
+  backendLoadFailed: '联网能力设置读取失败，请稍后刷新重试。',
+  backendSaveFailed: '设置保存失败，请重试。',
 }
 
 /** English dictionary; every key of {@link zh} appears here. */
 export const en = {
   nav: 'Zhipu plan',
+  tabWeb: 'Web capabilities',
+  tabAccount: 'Plan account',
   planPending: 'Reading the plan…',
   planAccount: 'Account',
   planDeployment: 'Deployment',
@@ -163,6 +182,7 @@ export const en = {
   usageShare: 'Share',
   usageCalls: 'Calls',
   usageTools: 'By tool',
+  usageActivity: 'Activity',
   toolName: 'Tool',
   toolCalls: 'Calls',
   usageActiveDays: 'Active days',
@@ -178,6 +198,20 @@ export const en = {
   subscriptionCycle: 'Billing cycle: {cycle}',
   subscriptionAutoRenew: 'Auto-renews',
   localNote: 'Quota and usage come from the Zhipu servers.',
+  backendHint: 'Additional Zhipu tools layered beside the built-in web tools; they reuse the plan credential this plugin signs in with — no separate key.',
+  backendSearch: 'Zhipu web search',
+  backendSearchHint: 'Adds the zhipu_web_search tool: 1–4 queries per call, merged and deduplicated, capped at 40 sources.',
+  backendReader: 'Zhipu web reader',
+  backendReaderHint: 'Adds the zhipu_web_fetch tool: returns Markdown, 20 s upstream timeout, body capped at 200,000 characters.',
+  backendZread: 'GitHub repository tools',
+  backendZreadHint: 'Adds the github_search_doc, github_get_repo_structure and github_read_file tools.',
+  backendPromptLanguage: 'Zhipu tool language',
+  backendPromptLanguageHint: 'On: tool descriptions and prompt sections in English; off: Chinese.',
+  backendFootnote: 'Built-in web_search / web_fetch stay untouched; switches apply instantly — these are additional Zhipu capabilities.',
+  backendReadOnly: 'The settings are read-only right now; the switches cannot be changed.',
+  backendNotReady: 'Not signed in to the Zhipu plan yet; these tools cannot run',
+  backendLoadFailed: 'Could not read the web capability settings; refresh and try again.',
+  backendSaveFailed: 'Saving the setting failed; try again.',
 }
 
 /** Keys this namespace owns. */

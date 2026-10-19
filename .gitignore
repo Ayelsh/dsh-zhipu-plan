@@ -4,6 +4,10 @@
 preview/
 *.tgz
 
+# Local DSH workspace: the skill copies the OpenSpec flow loads and the
+# recon scratch it wrote. Not part of the package.
+.dsh/
+
 # Dependencies
 node_modules/
 

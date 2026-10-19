@@ -48,12 +48,15 @@ const { chromium } = await import(entry)
 
 /** The scenarios `preview.mjs` writes, and what each one is called here. */
 const SCENARIOS = [
+  ['i', 'web-cn'],
+  ['j', 'web-en'],
   ['a', 'panel'],
-  ['d', 'waiting'],
-  ['e', 'signin'],
+  ['d', 'signin'],
+  ['e', 'signedout'],
   ['f', 'reading'],
   ['g', 'read-failed'],
   ['h', 'all-time'],
+  ['k', 'in-column'],
 ]
 const THEMES = [['plan-page.html', 'light'], ['plan-page-dark.html', 'dark']]
 
@@ -111,6 +114,9 @@ for (const [file, theme] of THEMES) {
     modal.style.cssText = 'position: static; inset: auto; padding: 36px; justify-content: center; align-items: flex-start;'
     const mask = modal.querySelector('.dzp-preview-modal-mask')
     if (mask !== null) mask.style.display = 'none'
+    // The comparison freeze above hides every modal with !important, which an
+    // inline style cannot beat; lift it explicitly now that it is the subject.
+    modal.style.setProperty('display', 'flex', 'important')
   })
   await page.setViewportSize({ width: 600, height: 640 })
   await page.waitForTimeout(120)

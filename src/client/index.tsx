@@ -18,9 +18,12 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import contribution from '../wire/typert-remote-client.js'
+import { BackendSettings, type BackendSettingsProps } from './BackendSettings.tsx'
 import { PlanPanel } from './PlanPanel.tsx'
+import { SettingsTabs, type SettingsTabSpec, type SettingsTabsProps } from './SettingsTabs.tsx'
 import type {
-  PlanAccount, PlanLoginState, PlanQuota, PlanResetKind, PlanResetStatus, PlanUsageRange, PlanUsageReport,
+  PlanAccount, PlanBackendSettingKey, PlanBackendSettingsSnapshot, PlanLoginState, PlanQuota, PlanResetKind,
+  PlanResetStatus, PlanUsageRange, PlanUsageReport,
 } from './plan-types.ts'
 import { ensureStyles, styles } from './styles.ts'
 import { en, zh, type PlanLocaleKey } from './locales.ts'
@@ -29,7 +32,7 @@ import { en, zh, type PlanLocaleKey } from './locales.ts'
 export const NS = 'settings.zhipuPlan'
 
 /** Cordis services this plugin needs: the slot registry, this page's dictionary, and the Remote carrier. */
-export const inject = ['slots', 'locale', 'remote']
+export const inject = ['slots', 'locale', 'remote', 'remote.settings']
 
 /** One Remote call's outcome, as the carrier reports it. */
 type RemoteResult<Value> =
@@ -56,6 +59,111 @@ interface PlanNamespace {
 /** What the section registration hands its component. */
 interface PlanSectionInjected {
   readonly plan: PlanPanelHostOperations
+  readonly backend: BackendSectionOperations
+}
+
+/** The capability switches' host operations, resolved from the settings namespace. */
+interface BackendSectionOperations {
+  readonly load: () => Promise<PlanBackendSettingsSnapshot | undefined>
+  readonly save: (key: PlanBackendSettingKey, value: boolean) => Promise<PlanBackendSettingsSnapshot>
+}
+
+/**
+ * The page's two views. They are separate subjects — what this plugin can do,
+ * and the account it does it for — so they are chosen rather than stacked.
+ */
+const TABS: readonly SettingsTabSpec[] = [
+  { id: 'web', label: 'tabWeb' },
+  { id: 'account', label: 'tabAccount' },
+]
+
+/** Profile entry this plugin's volatile switches live on. */
+const SETTINGS_NAMESPACE = 'zhipu-plan'
+
+/**
+ * The `settings` Remote namespace, as this page uses it: the describe view and
+ * the path-addressed write. It is a shell namespace rather than this plugin's,
+ * so it is read through the service table like the plan namespace is.
+ */
+interface SettingsNamespaceView {
+  readonly ns: string
+  readonly value: unknown
+  readonly revision: number
+}
+
+/** One path-addressed edit carried by a settings write. */
+type SettingsPathOp =
+  | { readonly op: 'set'; readonly path: readonly string[]; readonly value: boolean }
+  | { readonly op: 'unset'; readonly path: readonly string[] }
+
+interface SettingsRemote {
+  readonly describe: () => Promise<RemoteResult<{
+    readonly writable: boolean
+    readonly hasDocument: boolean
+    readonly namespaces: readonly SettingsNamespaceView[]
+  }>>
+  readonly mutate: (
+    ns: string,
+    ops: readonly SettingsPathOp[],
+    expectedRevision?: number,
+  ) => Promise<RemoteResult<SettingsNamespaceView>>
+}
+
+/**
+ * Read the settings namespace through the Remote carrier.
+ * @param ctx - this plugin's context.
+ * @returns the shell's settings namespace.
+ * @throws {Error} when the shell did not mount it.
+ */
+function settingsNamespace(ctx: ClientContext): SettingsRemote {
+  const namespace = ctx.get('remote.settings') as SettingsRemote | undefined
+  if (namespace === undefined) {
+    throw new Error('dsh-zhipu-plan: the settings Remote namespace is not mounted')
+  }
+  return namespace
+}
+
+/**
+ * Project one namespace view onto the four switches. A missing field reads as
+ * the schema default: search and reader on, zread and zhPrompt off.
+ * @param namespace - the resolved settings namespace view.
+ * @param writable - whether the profile accepts writes.
+ * @returns the snapshot the card renders.
+ */
+function backendSnapshot(namespace: SettingsNamespaceView, writable: boolean): PlanBackendSettingsSnapshot {
+  const value = (namespace.value ?? {}) as Record<string, unknown>
+  return {
+    writable,
+    settings: {
+      search: value.search !== false,
+      reader: value.reader !== false,
+      zread: value.zread === true,
+      zhPrompt: value.zhPrompt === true,
+    },
+  }
+}
+
+/** Read the switches once; undefined when the profile has no such namespace. */
+async function loadBackendSettings(ctx: ClientContext): Promise<PlanBackendSettingsSnapshot | undefined> {
+  const view = unwrap('settings/describe', await settingsNamespace(ctx).describe())
+  const namespace = view.namespaces.find(candidate => candidate.ns === SETTINGS_NAMESPACE)
+  return namespace === undefined ? undefined : backendSnapshot(namespace, view.writable)
+}
+
+/** Write one switch, then return the refreshed view. */
+async function saveBackendSetting(
+  ctx: ClientContext,
+  key: PlanBackendSettingKey,
+  value: boolean,
+): Promise<PlanBackendSettingsSnapshot> {
+  const remote = settingsNamespace(ctx)
+  const view = unwrap('settings/describe', await remote.describe())
+  const namespace = view.namespaces.find(candidate => candidate.ns === SETTINGS_NAMESPACE)
+  if (namespace === undefined) {
+    throw new Error('dsh-zhipu-plan: the zhipu-plan settings namespace is unavailable')
+  }
+  const response = await remote.mutate(SETTINGS_NAMESPACE, [{ op: 'set', path: [key], value }], namespace.revision)
+  return backendSnapshot(unwrap('settings/mutate', response), view.writable)
 }
 
 /** The host operations the panel calls, resolved from the mounted namespace. */
@@ -108,6 +216,11 @@ export function apply(ctx: ClientContext): void {
   // The nav label is read on every projection, so it follows a locale switch
   // without re-registering the entry.
   const t = ctx.locale.bind(NS) as (key: PlanLocaleKey) => string
+  // Stable identities: the card's read/write effects must not restart on every projection.
+  const backendOperations: BackendSectionOperations = {
+    load: () => loadBackendSettings(ctx),
+    save: (key, value) => saveBackendSetting(ctx, key, value),
+  }
   const injected = (): PlanSectionInjected => ({
     plan: {
       loadAccount: async () => {
@@ -154,6 +267,7 @@ export function apply(ctx: ClientContext): void {
       // an immutable snapshot whose `active` member is the current locale id.
       currentLocale: () => ctx.locale.getLocale().active,
     },
+    backend: backendOperations,
   })
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
@@ -164,6 +278,15 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: injected,
   }, function ZhipuPlanSection(props) {
-    return <section className={styles.panel}><PlanPanel {...props.plan} t={props.t as Parameters<typeof PlanPanel>[0]['t']} /></section>
+    const t = props.t as SettingsTabsProps['t']
+    return (
+      <SettingsTabs
+        t={t}
+        tabs={TABS}
+        render={(id) => (id === 'web'
+          ? <BackendSettings {...props.backend} t={props.t as BackendSettingsProps['t']} />
+          : <PlanPanel {...props.plan} t={props.t as Parameters<typeof PlanPanel>[0]['t']} />)}
+      />
+    )
   }))
 }

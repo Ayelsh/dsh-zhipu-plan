@@ -19,7 +19,9 @@
  * @module dsh-zhipu-plan/client/PlanUsagePanel
  */
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode,
+} from 'react'
 import type { PlanLocaleKey } from './locales.ts'
 import type { PlanDecodeSpeed, PlanUsageRange, PlanUsageReport } from './plan-types.ts'
 import { tokenText } from './token-text.ts'
@@ -82,6 +84,29 @@ function Fact(props: { readonly label: string; readonly value: string }): ReactN
     <div className={styles.factRow}>
       <dt className={styles.factLabel}>{props.label}</dt>
       <dd className={styles.factValue}>{props.value}</dd>
+    </div>
+  )
+}
+
+/**
+ * One activity figure: the number first, its label under it, and the qualifier
+ * the number needs on the same baseline.
+ * @param props - the label, the figure, and the optional qualifier.
+ * @returns the figure's cell in the stats grid.
+ */
+function Stat(props: {
+  readonly label: string
+  readonly value: string
+  readonly meta?: string
+  readonly wide?: boolean
+}): ReactNode {
+  return (
+    <div className={styles.stat} data-wide={props.wide === true ? 'true' : undefined}>
+      <dt className={styles.statLabel}>{props.label}</dt>
+      <dd className={styles.statValue}>
+        <span>{props.value}</span>
+        {props.meta === undefined ? undefined : <span className={styles.statMeta}>{props.meta}</span>}
+      </dd>
     </div>
   )
 }
@@ -199,7 +224,19 @@ export function PlanUsagePanel(props: {
     <section className={styles.section}>
       <div className={styles.sectionHead}>
         <h3 className={styles.sectionTitle}>{t('usageTitle')}</h3>
-        <div className={styles.rangeTabs} role="tablist" aria-label={t('usageTitle')}>
+        <div
+          className={styles.rangeTabs}
+          role="tablist"
+          aria-label={t('usageTitle')}
+          style={{
+            '--dzp-range-count': String(RANGES.length),
+            '--dzp-range-index': String(Math.max(0, RANGES.indexOf(range))),
+          } as CSSProperties}
+        >
+          {/* The pill is one element painted behind the labels, so the chosen
+              window reads as one object moving rather than as three fills
+              trading places. */}
+          <span className={styles.rangeThumb} aria-hidden="true" />
           {RANGES.map((candidate) => {
             const selected = candidate === range
             return (
@@ -282,7 +319,7 @@ export function PlanUsagePanel(props: {
               : (
                 <div className={styles.usageSection}>
                   {report.models.models.length === 0 ? null : (
-                    <>
+                    <div className={styles.usageBlock}>
                       <div className={styles.usageSectionHead}>
                         <h4 className={styles.dialogSectionTitle}>{t('usageModels')}</h4>
                         {monthScoped ? <span className={styles.sectionMeta}>{t('range30d')}</span> : null}
@@ -303,18 +340,20 @@ export function PlanUsagePanel(props: {
                               <td>{shareText(model.tokens, report.models.tokens)}</td>
                             </tr>
                           ))}
-                          <tr>
-                            <td>{t('usageCalls')}</td>
-                            <td>{String(report.models.calls)}</td>
-                            <td>—</td>
-                          </tr>
                         </tbody>
                       </table>
-                    </>
+                      {/* The call count is a total for the rows above, not a
+                          model among them, so it sits under the table rather
+                          than in it. */}
+                      <p className={styles.usageTotal}>
+                        <span>{t('usageCalls')}</span>
+                        <span>{String(report.models.calls)}</span>
+                      </p>
+                    </div>
                   )}
 
                   {report.tools.tools.length === 0 ? null : (
-                    <>
+                    <div className={styles.usageBlock}>
                       <div className={styles.usageSectionHead}>
                         <h4 className={styles.dialogSectionTitle}>{t('usageTools')}</h4>
                         {monthScoped ? <span className={styles.sectionMeta}>{t('range30d')}</span> : null}
@@ -335,34 +374,49 @@ export function PlanUsagePanel(props: {
                           ))}
                         </tbody>
                       </table>
-                    </>
+                    </div>
                   )}
 
-                  <dl className={styles.facts}>
-                    <Fact label={t('usageActiveDays')} value={String(activeDays)} />
-                    <Fact
-                      label={t('usagePeakDay')}
-                      value={`${tokenText(report.activity.peakDayTokens)}${report.activity.peakDay === undefined ? '' : ` (${report.activity.peakDay})`}`}
-                    />
-                    <Fact
-                      label={t('usageStreak')}
-                      value={`${String(report.activity.currentStreakDays)} / ${String(report.activity.longestStreakDays)}`}
-                    />
-                    <Fact label={t('usageUsageTime')} value={`${(report.activity.totalUsageMs / HOUR_MS).toFixed(1)} h`} />
-                    {report.credits.cacheHitRate === undefined
-                      ? null
-                      : (
-                        <Fact
-                          label={monthScoped ? `${t('usageCacheHit')} (${t('range30d')})` : t('usageCacheHit')}
-                          value={`${(report.credits.cacheHitRate * 100).toFixed(1)}%`}
-                        />
-                      )}
-                    {decode === undefined ? null : <Fact label={t('usageDecodeSpeed')} value={decode} />}
-                  </dl>
+                  <div className={styles.usageBlock}>
+                    <div className={styles.usageSectionHead}>
+                      <h4 className={styles.dialogSectionTitle}>{t('usageActivity')}</h4>
+                    </div>
+                    <dl className={styles.stats}>
+                      <Stat label={t('usageActiveDays')} value={String(activeDays)} />
+                      <Stat
+                        label={t('usagePeakDay')}
+                        value={tokenText(report.activity.peakDayTokens)}
+                        meta={report.activity.peakDay}
+                      />
+                      <Stat
+                        label={t('usageStreak')}
+                        value={`${String(report.activity.currentStreakDays)} / ${String(report.activity.longestStreakDays)}`}
+                      />
+                      <Stat
+                        label={t('usageUsageTime')}
+                        value={`${(report.activity.totalUsageMs / HOUR_MS).toFixed(1)} h`}
+                      />
+                      {report.credits.cacheHitRate === undefined
+                        ? null
+                        : (
+                          <Stat
+                            label={monthScoped ? `${t('usageCacheHit')} (${t('range30d')})` : t('usageCacheHit')}
+                            value={`${(report.credits.cacheHitRate * 100).toFixed(1)}%`}
+                          />
+                        )}
+                      {/* A per-tier sentence is not a figure: it takes the whole
+                          row, at the size a sentence is read at. */}
+                      {decode === undefined
+                        ? null
+                        : <Stat label={t('usageDecodeSpeed')} value={decode} wide />}
+                    </dl>
+                  </div>
 
                   {report.subscriptions.length === 0 ? null : (
-                    <>
-                      <h4 className={styles.dialogSectionTitle}>{t('subscription')}</h4>
+                    <div className={styles.usageBlock}>
+                      <div className={styles.usageSectionHead}>
+                        <h4 className={styles.dialogSectionTitle}>{t('subscription')}</h4>
+                      </div>
                       <dl className={styles.facts}>
                         {report.subscriptions.map(subscription => (
                           <Fact
@@ -376,7 +430,7 @@ export function PlanUsagePanel(props: {
                           />
                         ))}
                       </dl>
-                    </>
+                    </div>
                   )}
                 </div>
               )}

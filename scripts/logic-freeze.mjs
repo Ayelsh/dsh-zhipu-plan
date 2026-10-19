@@ -22,7 +22,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const CLIENT = join(ROOT, 'src', 'client')
 
 /** How many keys each dictionary carries; the restyle added and removed none. */
-const DICTIONARY_KEY_COUNT = 81
+const DICTIONARY_KEY_COUNT = 98
 
 /** Every key the page is allowed to resolve, whether by literal or by table. */
 const DICTIONARY_KEYS = [
@@ -30,6 +30,7 @@ const DICTIONARY_KEYS = [
   'planDeployment', 'planDeploymentBigmodel', 'planDeploymentZai', 'planKind', 'planKindIndividual',
   'planKindStart', 'planKindTeam', 'planPending', 'planSignIn', 'planSignInHint', 'planSignOut',
   'planTokenExpired', 'planTokenExpiry', 'planWaiting', 'quotaFiveHour', 'quotaStale', 'quotaTitle',
+  'tabAccount', 'tabWeb',
   'quotaTools', 'quotaUpdatedAt', 'quotaWeekly', 'range30d', 'range7d', 'rangeAll', 'refresh', 'reset',
   'resetAriaFiveHour', 'resetAriaWeek', 'resetCompleted', 'resetCompletedAt', 'resetCountdown',
   'resetCountdownDaysHours', 'resetCountdownDaysOnly', 'resetCountdownHoursMinutes',
@@ -41,6 +42,11 @@ const DICTIONARY_KEYS = [
   'unavailable', 'usageActiveDays', 'usageCacheHit', 'usageCalls', 'usageDecodeLite', 'usageDecodePro',
   'usageDecodeSpeed', 'usageEmpty', 'usageFailed', 'usageLoading', 'usageModel', 'usageModels',
   'usagePeakDay', 'usageShare', 'usageStreak', 'usageTitle', 'usageTokens', 'usageTools', 'usageUsageTime',
+  'usageActivity',
+  'backendHint', 'backendSearch', 'backendSearchHint', 'backendReader', 'backendReaderHint',
+  'backendZread', 'backendZreadHint', 'backendPromptLanguage', 'backendPromptLanguageHint',
+  'backendFootnote', 'backendReadOnly', 'backendNotReady',
+  'backendLoadFailed', 'backendSaveFailed',
 ]
 
 /** Identifiers the restyle must not have renamed, dropped, or replaced. */

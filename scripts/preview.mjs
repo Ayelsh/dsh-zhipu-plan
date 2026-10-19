@@ -84,6 +84,8 @@ async function capture(options, interact) {
   return html
 }
 
+const web = await capture({ dictionary: zh, localeId: 'zh-CN', loginState: { state: 'signed-in' }, tab: 'web' })
+const webEn = await capture({ dictionary: en, localeId: 'en', loginState: { state: 'signed-in' }, tab: 'web' })
 const signedIn = await capture({ dictionary: zh, localeId: 'zh-CN', loginState: { state: 'signed-in' } })
 const signedInEn = await capture({ dictionary: en, localeId: 'en', loginState: { state: 'signed-in' } })
 const dialog = await capture(
@@ -124,6 +126,8 @@ const allTime = await capture(
   },
 )
 
+const inFrame = await capture({ dictionary: zh, localeId: 'zh-CN', loginState: { state: 'signed-in' } })
+
 const themeCss = ['base.css', 'design-platform.css']
   .map(name => readFileSync(join(HARNESS, 'packages/client/ui-theme/src/styles', name), 'utf8'))
   .join('\n')
@@ -153,10 +157,22 @@ body { margin: 0; padding: 24px; background: var(--dsw-alias-bg-base); color: va
 .dzp-preview-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 0.5px solid var(--dsw-alias-border-secondary); }
 .dzp-preview-modal-title { font-size: 14px; font-weight: 600; }
 .dzp-preview-modal-body { padding: 16px; }
+/* The settings dialog's own geometry, copied from the shell so this preview can
+   answer the one question the page cannot answer alone: whether the page's top
+   edge survives the column that scrolls it. */
+.dzp-preview-frame { width: 800px; max-width: 100%; height: 520px; display: flex; flex-direction: column; border-radius: var(--dsw-radius-panel, 12px); background: var(--dsw-alias-bg-layer-1); border: 0.5px solid var(--dsw-alias-border-l1); overflow: hidden; }
+.dzp-preview-frameHead { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; height: 54px; padding: 20px 14px 8px 10px; box-sizing: border-box; }
+.dzp-preview-frameAction { font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.dzp-preview-frameClose { font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.dzp-preview-options { flex: 1; min-height: 0; padding: 0 24px 24px; overflow-y: auto; }
 </style>
 </head>
 <body@@DARK@@>
 <div class="dzp-preview-page">
+  <p class="dzp-preview-label">联网能力 / web capabilities（中文）</p>
+  <div class="dzp-preview-host" id="i">${web}</div>
+  <p class="dzp-preview-label">联网能力 / web capabilities（English）</p>
+  <div class="dzp-preview-host" id="j">${webEn}</div>
   <p class="dzp-preview-label">已登录 / signed in（中文）</p>
   <div class="dzp-preview-host" id="a">${signedIn}</div>
   <p class="dzp-preview-label">已登录 / signed in（English）</p>
@@ -173,6 +189,14 @@ body { margin: 0; padding: 24px; background: var(--dsw-alias-bg-base); color: va
   <div class="dzp-preview-host" id="g">${readFailed}</div>
   <p class="dzp-preview-label">全部时间 / all time</p>
   <div class="dzp-preview-host" id="h">${allTime}</div>
+  <p class="dzp-preview-label">设置面板的滚动列里 / inside the settings column</p>
+  <div class="dzp-preview-frame" id="k">
+    <div class="dzp-preview-frameHead">
+      <span class="dzp-preview-frameAction">打开配置文件</span>
+      <span class="dzp-preview-frameClose">✕</span>
+    </div>
+    <div class="dzp-preview-options">${inFrame}</div>
+  </div>
 </div>
 </body>
 </html>

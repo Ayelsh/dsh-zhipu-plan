@@ -43,6 +43,7 @@ import {
   usageWindow,
   usageWindows,
 } from './monitor.ts'
+import { profileDrifts, routeProfileValue } from './models.ts'
 import { PlanKeyError, resolvePlanKey } from './plan-key.ts'
 import { fetchQuota, pickPrimaryLimit } from './quota.ts'
 import {
@@ -817,36 +818,44 @@ export class ZhipuPlanService extends TypertRemoteService {
 
   /**
    * Point the shipped pi-ai coding routes at the signed-in deployment's
-   * credential reference, or clear both when no account is stored. The
-   * routes live in the `llm-pi-ai` entry's settings document — the same
-   * document the Models page edits — because a bundle patch row that
-   * overrides another bundle's row outlives this bundle and keeps the
-   * plugin manager from uninstalling it. Idempotent: only drift writes.
+   * credential reference and this plugin's model catalog, or clear both when
+   * no account is stored. The routes live in the `llm-pi-ai` entry's settings
+   * document — the same document the Models page edits — because a bundle
+   * patch row that overrides another bundle's row outlives this bundle and
+   * keeps the plugin manager from uninstalling it.
+   *
+   * Idempotent, and ownership-scoped: only drift in the two fields this
+   * plugin owns — the credential reference and the model list declared in
+   * `src/host/models.ts` — writes, and the write restates just those fields,
+   * so the rest of a profile (a display name, headers, a capacity the user
+   * set) survives every sync. Model entries this module does not declare are
+   * never removed; a user's own hand-declared model rides along untouched.
    * @throws when the settings write is refused; the caller owns reporting.
    */
   private async syncProviderRoutes(): Promise<void> {
     const account = readAccountPayload(await this.ctx.credentials.readRecord(accountRecordKey()))
     const lit = account === undefined ? undefined : this.providerRoute(account.deployment)
-    const routes = this.providerRoutesInSettings()
+    const profiles = this.providerProfilesInSettings()
     const ops = []
     for (const route of ['zai', 'zai-coding-cn'] as const) {
-      const wanted = route === lit ? this.config.planKeyEnvs[account!.deployment] : undefined
-      if (routes[route] === wanted) continue
-      ops.push(wanted === undefined
-        ? { op: 'unset', path: ['providers', route] }
-        : { op: 'set', path: ['providers', route], value: { apiKeyEnv: wanted } })
+      if (route !== lit) {
+        if (profiles[route] !== undefined) ops.push({ op: 'unset', path: ['providers', route] })
+        continue
+      }
+      const apiKeyEnv = this.config.planKeyEnvs[account!.deployment]
+      if (!profileDrifts(profiles[route], apiKeyEnv, route)) continue
+      ops.push({ op: 'set', path: ['providers', route], value: routeProfileValue(profiles[route], apiKeyEnv, route) })
     }
     if (ops.length === 0) return
     await this.ctx.settings.mutate('llm-pi-ai', ops)
   }
 
-  /** The coding routes' credential references currently in the settings document. */
-  private providerRoutesInSettings(): Record<'zai' | 'zai-coding-cn', string | undefined> {
+  /** The coding routes' profile values as the settings document currently holds them. */
+  private providerProfilesInSettings(): Record<'zai' | 'zai-coding-cn', unknown> {
     const settings: SettingsForms = this.ctx.settings
     const form = settings.describe().find(descriptor => descriptor.ns === 'llm-pi-ai')
-    const providers = (form?.value as { providers?: Record<string, { apiKeyEnv?: string }> } | undefined)
-      ?.providers ?? {}
-    return { zai: providers.zai?.apiKeyEnv, 'zai-coding-cn': providers['zai-coding-cn']?.apiKeyEnv }
+    const providers = (form?.value as { providers?: Record<string, unknown> } | undefined)?.providers ?? {}
+    return { zai: providers.zai, 'zai-coding-cn': providers['zai-coding-cn'] }
   }
 
   /** The plan key one stored account currently authenticates the monitor with. */

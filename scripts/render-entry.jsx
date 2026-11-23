@@ -8,6 +8,11 @@ import { createRoot } from 'react-dom/client'
 import { zh } from '../src/client/locales.ts'
 import { BackendSettings } from '../src/client/BackendSettings.tsx'
 import { SettingsTabs } from '../src/client/SettingsTabs.tsx'
+import { ensureStyles } from '../src/client/styles.ts'
+
+// The plugin injects the sheet when it applies; the smoke does the same, so the
+// containment assertions run against the shipped CSS rather than only classes.
+ensureStyles()
 
 const state = {
   snapshot: {

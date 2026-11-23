@@ -189,6 +189,22 @@ body { margin: 0; padding: 24px; background: var(--dsw-alias-bg-base); color: va
   <div class="dzp-preview-host" id="g">${readFailed}</div>
   <p class="dzp-preview-label">全部时间 / all time</p>
   <div class="dzp-preview-host" id="h">${allTime}</div>
+  <p class="dzp-preview-label">宿主皮肤重绘 [role=switch] 时 / under a host skin that restyles every switch</p>
+  <style>
+  /* A scoped copy of the rules dsh-liquid-glass applies globally, with one more
+     class of specificity than the real ones: the row must keep its own surface
+     even then. The bare switch at the end is the control — it does get painted. */
+  .dzp-preview-skin [role='switch'] { border-radius: 999px; }
+  .dzp-preview-skin [role='switch'][aria-checked='true'] { background-color: #3d5afe; box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.3); }
+  .dzp-preview-skin [role='switch'][aria-checked='false'] { background-color: rgba(0, 0, 0, 0.16); box-shadow: inset 0 1px 2px rgba(16, 22, 40, 0.12); }
+  </style>
+  <div class="dzp-preview-skin dzp-preview-host" id="l">
+    ${web}
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 2px 0;font-size:12px;color:var(--dsw-alias-label-tertiary)">
+      <span>对照 / control（裸开关，应当被皮肤染色）</span>
+      <button type="button" role="switch" aria-checked="true" aria-label="control" style="width:51px;height:31px;border:0;padding:0"><span></span></button>
+    </div>
+  </div>
   <p class="dzp-preview-label">设置面板的滚动列里 / inside the settings column</p>
   <div class="dzp-preview-frame" id="k">
     <div class="dzp-preview-frameHead">

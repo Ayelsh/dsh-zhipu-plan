@@ -57,6 +57,7 @@ const SCENARIOS = [
   ['g', 'read-failed'],
   ['h', 'all-time'],
   ['k', 'in-column'],
+  ['l', 'skin-guard'],
 ]
 const THEMES = [['plan-page.html', 'light'], ['plan-page-dark.html', 'dark']]
 

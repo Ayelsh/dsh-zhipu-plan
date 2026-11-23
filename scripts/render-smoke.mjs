@@ -90,6 +90,40 @@ if (states() !== 'true,true,false,false') throw new Error(`render: initial switc
 if (!document.body.textContent.includes(zh.backendFootnote)) throw new Error('render: the zh footnote is missing')
 console.log('render: card class, defaults, and footnote present')
 
+// A host skin may restyle every [role='switch'] as a switch track. The row
+// keeps the switch role for its semantics, so its surface must stay its own
+// even when such a sheet lands after ours. These are the real rules from
+// dsh-liquid-glass, with its token values resolved to literals.
+const hostile = document.createElement('style')
+hostile.textContent = [
+  "[role='switch'] { border-radius: 999px; }",
+  "[role='switch'][aria-checked='true'] { background-color: rgb(61, 90, 254); box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.3); }",
+  "[role='switch'][aria-checked='false'] { background-color: rgba(0, 0, 0, 0.16); box-shadow: inset 0 1px 2px rgba(16, 22, 40, 0.12); }",
+].join('\n')
+document.head.append(hostile)
+const view = document.defaultView
+
+// Control: the sheet is live, and it does paint a bare switch track.
+const bare = document.createElement('button')
+bare.setAttribute('role', 'switch')
+bare.setAttribute('aria-checked', 'true')
+document.body.append(bare)
+const bareStyle = view.getComputedStyle(bare)
+if (bareStyle.backgroundColor !== 'rgb(61, 90, 254)') {
+  throw new Error(`render: the hostile sheet never applied (a bare switch is ${bareStyle.backgroundColor})`)
+}
+bare.remove()
+
+const rowStyle = view.getComputedStyle(switches()[0])
+if (rowStyle.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+  throw new Error(`render: a host skin repainted the row (${rowStyle.backgroundColor})`)
+}
+if (rowStyle.backgroundImage !== 'none') throw new Error(`render: a host skin painted the row (${rowStyle.backgroundImage})`)
+if (rowStyle.borderRadius !== '10px') throw new Error(`render: a host skin reshaped the row (${rowStyle.borderRadius})`)
+if (rowStyle.boxShadow !== 'none') throw new Error(`render: a host skin lit the row (${rowStyle.boxShadow})`)
+hostile.remove()
+console.log('render: the row surface survives a host [role=switch] skin')
+
 switches()[0].click()
 await until('search off after the first click', () => states() === 'false,true,false,false')
 if (globalThis.__probe.calls().join('|') !== 'search=false') throw new Error(`render: calls are ${globalThis.__probe.calls()}`)
